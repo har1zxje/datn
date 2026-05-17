@@ -1,0 +1,64 @@
+.product-detail-modal {
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(50px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.product-detail-image {
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 0.5rem;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+}
+
+.product-detail-image:hover {
+  transform: scale(1.05);
+  transition: transform 0.3s ease;
+}
+
+.quantity-selector {
+  display: flex;
+  align-items: center;
+  border: 2px solid #e5e7eb;
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.quantity-selector button {
+  background: #f3f4f6;
+  border: none;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.quantity-selector button:hover {
+  background: #e5e7eb;
+}
+
+.quantity-selector input {
+  border: none;
+  text-align: center;
+  width: 4rem;
+  padding: 0.5rem;
+  font-weight: bold;
+}
+
+.star-rating {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.rating-value {
+  font-size: 1.25rem;
+  color: #fbbf24;
+}
