@@ -1,0 +1,49 @@
+@startuml
+title Chatbot Flow (As-Is)
+skinparam shadowing false
+skinparam linetype ortho
+
+actor User
+participant "ChatWidget.jsx" as ChatUI
+participant "frontend/services/chatbot.js" as ChatService
+participant "frontend/services/api.js" as FEAPI
+participant "FastAPI\n/api/products" as ProductRoute
+participant "n8n Webhook\n(VITE_N8N_CHAT_WEBHOOK_URL)" as N8N
+
+User -> ChatUI: Type message + send
+ChatUI -> ChatService: sendChatMessage(message, user_context, signal)
+
+alt product context cache miss
+  ChatService -> FEAPI: getProducts(limit=100)
+  FEAPI -> ProductRoute: GET /api/products
+  ProductRoute --> FEAPI: product list
+  FEAPI --> ChatService: normalized products
+else cache hit
+  ChatService -> ChatService: reuse cached products
+end
+
+ChatService -> ChatService: findMatchingProducts()\nbuildContextProducts()\nbuild persona + payload
+
+alt n8n webhook URL is missing
+  ChatService --> ChatUI: config guidance + local suggestions
+else webhook URL exists
+  ChatService -> N8N: POST webhook (timeout + retry)\nheader: X-Correlation-Id
+
+  alt network error or non-200
+    N8N --> ChatService: error/failed status
+    ChatService --> ChatUI: fallback message + local suggestions
+  else webhook success
+    N8N --> ChatService: JSON or text response
+    alt JSON response
+      ChatService -> ChatService: normalizeN8nResponse()\nextract products or infer from text
+      ChatService --> ChatUI: assistant content + suggestions
+    else text response
+      ChatService -> ChatService: infer product suggestions
+      ChatService --> ChatUI: text + inferred suggestions
+    end
+  end
+end
+
+ChatUI -> User: Render assistant reply + product cards
+
+@enduml

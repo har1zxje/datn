@@ -28,25 +28,23 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    """Create JWT access token"""
+    """Create JWT access token."""
     to_encode = data.copy()
-    
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire, "type": "access"})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
 
 def create_refresh_token(data: dict) -> str:
-    """Create JWT refresh token"""
+    """Create JWT refresh token.
+
+    [H1] data phải chứa 'ver' (token_version) để invalidate khi user đổi mật khẩu.
+    Ví dụ: create_refresh_token({"sub": str(user.id), "ver": user.token_version})
+    """
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     to_encode.update({"exp": expire, "type": "refresh"})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 def verify_token(token: str, token_type: str = "access") -> Optional[dict]:
     """Verify JWT token and return payload"""

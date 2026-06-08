@@ -1,9 +1,13 @@
 """
 Authentication APIs: Register, Login, Refresh Token, Get Current User
 """
+import datetime
+import os
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import ValidationError
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 import models
 import schemas
@@ -17,10 +21,18 @@ from utils.auth import (
     get_user_id_from_token,
     ACCESS_TOKEN_EXPIRE_MINUTES
 )
-import datetime
+from utils.email import generate_reset_token, send_password_reset_email
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+limiter = Limiter(key_func=get_remote_address)
+TESTING_MODE = os.getenv("TESTING", "").lower() in {"1", "true", "yes", "on"}
+
+
+def rate_limit(rule: str):
+    if TESTING_MODE:
+        return lambda func: func
+    return limiter.limit(rule)
 
 # ============ HELPER FUNCTIONS ============
 
@@ -94,8 +106,9 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 
 # ============ AUTH ENDPOINTS ============
 
-@router.post("/register", response_model=schemas.TokenData)
-def register(user: schemas.UserRegister, db: Session = Depends(get_db)):
+@router.post("/register", response_model=schemas.TokenData, status_code=status.HTTP_201_CREATED)
+@rate_limit("5/minute")          # [C3] Tối đa 5 lần đăng ký/phút/IP
+def register(request: Request, user: schemas.UserRegister, db: Session = Depends(get_db)):
     """
     Register new user
     
@@ -135,15 +148,16 @@ def register(user: schemas.UserRegister, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_user)
     
-    # Generate tokens
+    # [H1] Nhúng token_version vào refresh token
+    token_ver = int(db_user.token_version or 0)
     access_token = create_access_token({"sub": str(db_user.id)})
-    refresh_token = create_refresh_token({"sub": str(db_user.id)})
-    
+    refresh_token = create_refresh_token({"sub": str(db_user.id), "ver": token_ver})
+
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "bearer",
-        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,  # seconds
+        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         "user": {
             "id": db_user.id,
             "username": db_user.username,
@@ -155,7 +169,9 @@ def register(user: schemas.UserRegister, db: Session = Depends(get_db)):
     }
 
 @router.post("/login", response_model=schemas.TokenData)
+@rate_limit("10/minute")         # [C3] Tối đa 10 lần login/phút/IP
 def login(
+    request: Request,
     credentials: schemas.UserLogin = Depends(parse_login_credentials),
     db: Session = Depends(get_db),
 ):
@@ -197,13 +213,13 @@ def login(
             detail="Invalid username/email or password"
         )
     
-    # Update last_login
     db_user.last_login = datetime.datetime.utcnow()
     db.commit()
-    
-    # Generate tokens
+
+    # [H1] Nhúng token_version để refresh token bị invalidate khi đổi mật khẩu
+    token_ver = int(db_user.token_version or 0)
     access_token = create_access_token({"sub": str(db_user.id)})
-    refresh_token = create_refresh_token({"sub": str(db_user.id)})
+    refresh_token = create_refresh_token({"sub": str(db_user.id), "ver": token_ver})
     
     return {
         "access_token": access_token,
@@ -235,26 +251,34 @@ async def refresh_token_endpoint(
     """
     
     payload = verify_token(refresh_token, token_type="refresh")
-    
+
     if not payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token"
         )
-    
+
     user_id = int(payload.get("sub"))
-    
-    # Verify user still exists
+
     db_user = db.query(models.User).filter(models.User.id == user_id).first()
     if not db_user or not db_user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or inactive"
         )
-    
-    # Generate new tokens
+
+    # [H1] Kiểm tra token_version — nếu không khớp thì token đã bị revoke
+    token_ver_in_jwt = payload.get("ver")
+    current_ver = int(db_user.token_version or 0)
+    if token_ver_in_jwt is not None and int(token_ver_in_jwt) != current_ver:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token da het hieu luc do doi mat khau. Vui long dang nhap lai."
+        )
+
+    # Phát hành token mới với version hiện tại
     access_token = create_access_token({"sub": str(user_id)})
-    new_refresh_token = create_refresh_token({"sub": str(user_id)})
+    new_refresh_token = create_refresh_token({"sub": str(user_id), "ver": current_ver})
     
     return {
         "access_token": access_token,
@@ -269,6 +293,100 @@ async def refresh_token_endpoint(
             "is_admin": db_user.is_admin,
             "role": db_user.role.value
         }
+    }
+
+
+@router.post("/forgot-password")
+@rate_limit("3/minute")          # [C3] Chống spam email reset
+def forgot_password(
+    request: Request,
+    payload: schemas.ForgotPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    """[C2] Gửi email chứa link reset mật khẩu (có hiệu lực 15 phút)."""
+    user = db.query(models.User).filter(models.User.email == payload.email).first()
+
+    # Luôn trả về thành công dù email có tồn tại hay không — chống user enumeration
+    if user and user.is_active:
+        token = generate_reset_token()
+        user.password_reset_token = token
+        user.password_reset_expires_at = datetime.datetime.utcnow() + datetime.timedelta(minutes=15)
+        db.commit()
+        # Gửi email — nếu thất bại vẫn trả về success (không lộ thông tin)
+        send_password_reset_email(user.email, token, user.full_name)
+
+    return {
+        "success": True,
+        "message": "Neu email ton tai, lien ket dat lai mat khau da duoc gui.",
+    }
+
+
+@router.post("/reset-password")
+@rate_limit("5/minute")
+def reset_password(
+    request: Request,
+    payload: schemas.ResetPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    """[C2] Đặt lại mật khẩu bằng token nhận từ email."""
+    user = db.query(models.User).filter(
+        models.User.password_reset_token == payload.token,
+        models.User.is_active == True,
+    ).first()
+
+    if not user or not user.password_reset_expires_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token khong hop le hoac da het han",
+        )
+
+    if datetime.datetime.utcnow() > user.password_reset_expires_at:
+        # Xóa token hết hạn
+        user.password_reset_token = None
+        user.password_reset_expires_at = None
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token da het han. Vui long yeu cau dat lai mat khau moi.",
+        )
+
+    user.hashed_password = hash_password(payload.new_password)
+    # Xóa token sau khi dùng — one-time use
+    user.password_reset_token = None
+    user.password_reset_expires_at = None
+    user.updated_at = datetime.datetime.utcnow()
+    db.commit()
+
+    return {"success": True, "message": "Dat lai mat khau thanh cong. Vui long dang nhap lai."}
+
+
+@router.post("/change-password")
+def change_password(
+    payload: schemas.ChangePasswordRequest,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not verify_password(payload.current_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Mat khau hien tai khong dung",
+        )
+
+    if payload.current_password == payload.new_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Mat khau moi phai khac mat khau hien tai",
+        )
+
+    current_user.hashed_password = hash_password(payload.new_password)
+    current_user.updated_at = datetime.datetime.utcnow()
+    # [H1] Tăng token_version → tất cả refresh token cũ bị invalidate ngay lập tức
+    current_user.token_version = int(current_user.token_version or 0) + 1
+    db.commit()
+
+    return {
+        "success": True,
+        "message": "Doi mat khau thanh cong. Vui long dang nhap lai tren tat ca thiet bi.",
     }
 
 @router.get("/me", response_model=schemas.UserProfile)
@@ -291,6 +409,8 @@ def get_current_user_info(current_user: models.User = Depends(get_current_user))
         address=current_user.address,
         city=current_user.city,
         phone=current_user.phone,
+        gender=current_user.gender,
+        date_of_birth=current_user.date_of_birth,
         created_at=current_user.created_at,
         last_login=current_user.last_login
     )
@@ -325,6 +445,10 @@ def update_current_user(
         current_user.city = user_update.city
     if user_update.postal_code is not None:
         current_user.postal_code = user_update.postal_code
+    if user_update.gender is not None:
+        current_user.gender = user_update.gender
+    if user_update.date_of_birth is not None:
+        current_user.date_of_birth = user_update.date_of_birth
     
     current_user.updated_at = datetime.datetime.utcnow()
     
@@ -344,6 +468,8 @@ def update_current_user(
         address=current_user.address,
         city=current_user.city,
         phone=current_user.phone,
+        gender=current_user.gender,
+        date_of_birth=current_user.date_of_birth,
         created_at=current_user.created_at,
         last_login=current_user.last_login
     )

@@ -1,0 +1,31 @@
+@startuml
+title FreshFood Observability (As-Is)
+skinparam shadowing false
+skinparam linetype ortho
+
+node "FreshFood Backend\nFastAPI :8001" as Backend
+node "Prometheus :9090" as Prom
+node "Grafana :3001" as Grafana
+node "Promtail" as Promtail
+node "Loki :3100" as Loki
+folder "backend/logs/*.log" as LogFiles
+
+Backend --> Prom : /metrics\n(freshfood_http_*, freshfood_scan_events_total)
+LogFiles --> Promtail : tail files
+Promtail --> Loki : push logs
+
+Grafana --> Prom : query metrics datasource
+Grafana --> Loki : query logs datasource
+
+note right of Prom
+target scrape:
+host.docker.internal:8001
+path: /metrics
+end note
+
+note right of LogFiles
+As-is gap:
+Promtail da cau hinh doc log file,\nnhung app chua thay config ghi log file ro rang.
+end note
+
+@enduml

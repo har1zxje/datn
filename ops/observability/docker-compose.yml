@@ -1,0 +1,60 @@
+version: "3.8"
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: freshfood_prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.1.1
+    container_name: freshfood_loki
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    ports:
+      - "3100:3100"
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:3.1.1
+    container_name: freshfood_promtail
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - ../../backend/logs:/var/log/freshfood:ro
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: freshfood_grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+    depends_on:
+      - prometheus
+      - loki
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  loki_data:
+  grafana_data:

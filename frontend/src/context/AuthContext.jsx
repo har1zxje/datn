@@ -43,10 +43,7 @@ export const AuthProvider = ({ children }) => {
 
     window.addEventListener('freshfood:auth-expired', handleSessionExpired);
     bootstrapSession();
-
-    return () => {
-      window.removeEventListener('freshfood:auth-expired', handleSessionExpired);
-    };
+    return () => window.removeEventListener('freshfood:auth-expired', handleSessionExpired);
   }, []);
 
   const login = async (username, password) => {

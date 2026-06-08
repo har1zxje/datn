@@ -1,0 +1,39 @@
+@startuml
+title AI Scan - Backend Flow (As-Is)
+skinparam shadowing false
+skinparam linetype ortho
+
+participant "FastAPI Router\n/api/scans" as Router
+participant "quick_analyze_scan()" as Quick
+participant "mock_ai_scan()" as MockScan
+participant "Standards Engine\n(evaluate_freshness_with_standards)" as STD
+participant "Visual Engine\n(evaluate_visual_spoilage)" as VIS
+participant "Mock Fallback\nmodel_inference_mock_v1" as MOCK
+participant "Observability\nrecord_scan_event()" as Obs
+database "ScanFeedbackEvent table" as FB
+
+Router -> Quick: POST /quick-analyze
+Quick -> Quick: Validate image_file|image_url
+Quick -> MockScan: run with indicators/profile
+
+MockScan -> STD: Try standards scoring
+alt standards_result != null
+  STD --> MockScan: standards result
+else standards null
+  MockScan -> VIS: Try visual quantification
+  alt visual_result != null
+    VIS --> MockScan: visual result
+  else visual null
+    MockScan -> MOCK: Use mock fallback
+    MOCK --> MockScan: mock result
+  end
+end
+
+MockScan --> Quick: ai_result
+Quick -> Obs: record_scan_event(completed, assessment_basis)
+Quick --> Router: QuickScanResponse
+
+Router -> FB: POST /feedback-events\n(ScanFeedbackCreate)
+FB --> Router: stored feedback row
+
+@enduml

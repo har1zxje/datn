@@ -1,0 +1,45 @@
+@startuml
+title Login Flow (As-Is)
+skinparam shadowing false
+skinparam linetype ortho
+
+actor User
+participant "Auth Page\n(Auth.jsx)" as AuthPage
+participant "AuthContext" as AuthCtx
+participant "frontend/services/api.js\n(Axios + Interceptor)" as FEAPI
+participant "FastAPI\n/api/auth/login" as AuthRoute
+participant "auth.py" as AuthAPI
+database "PostgreSQL/SQLite\nusers" as DB
+collections "Browser localStorage" as LS
+
+User -> AuthPage: Submit username + password
+AuthPage -> AuthCtx: login(username, password)
+AuthCtx -> FEAPI: login(username, password)
+FEAPI -> AuthRoute: POST /api/auth/login (JSON)
+AuthRoute -> AuthAPI: parse_login_credentials()
+AuthAPI -> DB: Find user by username/email
+DB --> AuthAPI: User row / null
+
+alt Invalid credentials
+  AuthAPI --> FEAPI: 401 Unauthorized
+  FEAPI --> AuthCtx: throw error.detail
+  AuthCtx --> AuthPage: show login error
+else Valid credentials
+  AuthAPI -> AuthAPI: verify_password()
+  AuthAPI -> DB: update last_login + commit
+  AuthAPI -> AuthAPI: create_access_token()\ncreate_refresh_token()
+  AuthAPI --> FEAPI: 200 {access_token, refresh_token, user}
+  FEAPI -> LS: saveAuthSession()
+  FEAPI --> AuthCtx: return token + user
+  AuthCtx --> AuthPage: setUser(user)
+  AuthPage -> AuthPage: navigate(from || "/")
+end
+
+note right of FEAPI
+When protected API returns 401:
+- interceptor calls /api/auth/refresh
+- retries original request if refresh success
+- clears session + redirect /auth if refresh fails
+end note
+
+@enduml

@@ -1,0 +1,28 @@
+@startuml
+title AI Scan - FE/BE Integration (As-Is)
+skinparam shadowing false
+skinparam linetype ortho
+
+actor User
+participant "Frontend Scanner\nReact" as FE
+participant "Backend API\nPOST /api/scans/quick-analyze" as API
+participant "Backend Engines\nStandards/Visual/Mock" as Engines
+database "Feedback DB\nScanFeedbackEvent" as FB
+
+User -> FE: Upload image / chon profile
+FE -> API: quickAnalyzeScan(form-data)
+API -> Engines: standards -> visual -> mock fallback
+Engines --> API: freshness payload
+API --> FE: freshness_level, ai_confidence,\nspoilage_ratio_pct, needs_manual_review
+
+alt quick-analyze loi
+  FE -> FE: fallback local TFJS
+end
+
+User -> FE: Gui feedback
+FE -> API: POST /api/scans/feedback-events
+API -> FB: insert feedback event
+FB --> API: saved
+API --> FE: success
+
+@enduml

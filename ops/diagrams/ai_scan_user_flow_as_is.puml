@@ -1,0 +1,50 @@
+@startuml
+title User AI Scan Flow (As-Is)
+skinparam shadowing false
+skinparam linetype ortho
+
+actor User
+participant "Frontend Scanner\n(React)" as FE
+participant "Local TFJS Model\n/tfjs_model/model.json" as TFJS
+participant "Backend API\nPOST /api/scans/quick-analyze" as API
+participant "Standards Engine\n(evaluate_freshness_with_standards)" as STD
+participant "Visual Engine\n(evaluate_visual_spoilage)" as VIS
+participant "Mock Engine\n(model_inference_mock_v1)" as MOCK
+database "ScanFeedbackEvent table" as FB
+
+User -> FE: Mo man hinh Scanner
+FE -> TFJS: Load labels.json + model.json
+
+alt Quet camera live
+  User -> FE: Bat camera
+  loop Moi frame
+    FE -> TFJS: predictFreshness(videoFrame)
+    TFJS --> FE: label + confidence + status
+  end
+else Upload anh
+  User -> FE: Chon anh + profile
+  FE -> API: quick-analyze(form-data)
+  API -> STD: Thu standards scoring
+  alt standards_result != null
+    STD --> API: assessment_basis = standards_*
+  else standards null
+    API -> VIS: Thu visual quantification
+    alt visual_result != null
+      VIS --> API: assessment_basis = visual_spoilage_quantification_v2
+    else visual null
+      API -> MOCK: fallback
+      MOCK --> API: assessment_basis = model_inference_mock_v1
+    end
+  end
+  API --> FE: freshness_level, ai_confidence,\nspoilage_ratio_pct, needs_manual_review
+
+  alt Backend loi
+    FE -> TFJS: predictFreshness(uploadedImage)
+    TFJS --> FE: fallback local result
+  end
+end
+
+User -> FE: Gui feedback dung/sai
+FE -> FB: POST /api/scans/feedback-events
+
+@enduml
