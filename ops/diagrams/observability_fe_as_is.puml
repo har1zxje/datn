@@ -1,0 +1,27 @@
+@startuml
+title Frontend Observability (As-Is)
+skinparam shadowing false
+skinparam linetype ortho
+
+actor User
+node "Frontend App\nReact + Vite build" as FEApp
+node "Nginx Static Host :80" as Nginx
+node "Browser DevTools" as DevTools
+node "Prometheus/Loki/Grafana Stack" as Obs
+
+User -> FEApp : Su dung UI tren browser
+FEApp -> Nginx : Serve static assets\n(index.html, js, css, tfjs model)
+FEApp --> DevTools : console.error / network errors
+
+note right of Obs
+As-is:
+- Chua co FE metrics endpoint
+- Prometheus chua scrape FE
+- Promtail stack hien tai chi map\nbackend/logs, chua map FE logs
+end note
+
+note right of Nginx
+nginx.conf chi khai bao SPA fallback:\ntry_files $uri /index.html
+end note
+
+@enduml

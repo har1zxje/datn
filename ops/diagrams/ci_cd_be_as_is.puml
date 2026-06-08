@@ -1,0 +1,31 @@
+@startuml
+title Backend CI/CD (As-Is)
+skinparam shadowing false
+skinparam linetype ortho
+
+actor Dev
+participant "GitHub Repo" as Repo
+participant "GitHub Actions\nfreshfood-ci-cd" as GHA
+participant "backend-ci\n(Python 3.10)" as BCI
+participant "build-and-publish-images" as CD
+database "GHCR" as GHCR
+
+Dev -> Repo: Push / Open PR
+Repo -> GHA: Trigger workflow\n(path includes test1/backend/**)
+GHA -> BCI: Checkout\npip install -r requirements.txt\npytest -q tests
+BCI --> GHA: pass/fail
+
+alt Event = push AND backend-ci pass\n(and frontend-ci pass)
+  GHA -> CD: Build backend image
+  CD -> GHCR: Push freshfood-backend:<sha>
+else pull_request
+  GHA -> GHA: Skip image push
+end
+
+note right of CD
+As-is:
+- Workflow build/push image only
+- Chua co step deploy backend\n(staging/prod)
+end note
+
+@enduml

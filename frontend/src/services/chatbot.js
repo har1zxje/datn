@@ -341,9 +341,9 @@ export const sendChatMessage = async ({ message, user_context = {}, signal } = {
   if (!N8N_WEBHOOK_URL) {
     return {
       content:
-        'Chatbot chua duoc cau hinh webhook n8n nen toi chua the lay cong thuc tu nguon uy tin.\n\n' +
-        '- Them `VITE_N8N_CHAT_WEBHOOK_URL` vao file `.env` cua frontend.\n' +
-        '- Khi webhook hoat dong, payload se gui `message`, `user_context`, `available_products` va `persona` de n8n tra ve cong thuc kem san pham phu hop.',
+        'Chatbot chưa được cấu hình webhook n8n nên tôi chưa thể lấy công thức từ nguồn uy tín.\n\n' +
+        '- Thêm `VITE_N8N_CHAT_WEBHOOK_URL` vào file `.env` của frontend.\n' +
+        '- Khi webhook hoạt động, payload sẽ gửi `message`, `user_context`, `available_products` và `persona` để n8n trả về công thức kèm sản phẩm phù hợp.',
       products: localProductSuggestions,
       payload,
     };
@@ -359,7 +359,7 @@ export const sendChatMessage = async ({ message, user_context = {}, signal } = {
     console.error('n8n webhook error', { correlationId, error });
     return {
       content:
-        'Toi chua ket noi duoc n8n de lay cong thuc tu nguon uy tin. Ban co the thu lai sau it phut; ben duoi la cac san pham FreshFood co the lien quan den cau hoi cua ban.',
+        'Tôi chưa kết nối được n8n để lấy công thức từ nguồn uy tín. Bạn có thể thử lại sau ít phút; bên dưới là các sản phẩm FreshFood có thể liên quan đến câu hỏi của bạn.',
       products: localProductSuggestions,
       payload: {
         ...payload,
@@ -372,7 +372,7 @@ export const sendChatMessage = async ({ message, user_context = {}, signal } = {
     console.error('n8n webhook non-200', { correlationId, status: response.status });
     return {
       content:
-        'Toi chua ket noi duoc n8n de lay cong thuc tu nguon uy tin. Ban co the thu lai sau it phut; ben duoi la cac san pham FreshFood co the lien quan den cau hoi cua ban.',
+        'Tôi chưa kết nối được n8n để lấy công thức từ nguồn uy tín. Bạn có thể thử lại sau ít phút; bên dưới là các sản phẩm FreshFood có thể liên quan đến câu hỏi của bạn.',
       products: localProductSuggestions,
       payload,
     };

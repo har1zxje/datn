@@ -126,7 +126,8 @@ POST   /api/orders/{id}/cancel    - Cancel pending order (auth required)
 
 ### Scans (AI Freshness Detection)
 ```
-POST   /api/scans                 - Create scan (auth required, mock in Phase 1)
+POST   /api/scans                 - Create scan (auth required, standards + visual v2)
+POST   /api/scans/quick-analyze   - Quick upload/url scan (no auth, FE-friendly)
 GET    /api/scans                 - List user's scans (auth required)
 GET    /api/scans/{id}            - Get scan result (auth required)
 POST   /api/scans/{id}/feedback   - Submit feedback (auth required)
@@ -239,6 +240,7 @@ backend/
 
 ### Week 3: Scans & Admin
 - [ ] AI scan API (mock backend → real Phase 2)
+- [x] Visual spoilage quantification v2 (`A_hong/A_tong`) with manual-review gate
 - [ ] Scan history & results
 - [ ] Admin dashboard endpoints
 - [ ] User/order/product administration

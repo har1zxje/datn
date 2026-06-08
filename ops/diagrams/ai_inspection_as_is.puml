@@ -1,0 +1,47 @@
+@startuml
+title AI Inspection Runtime Flow (As-Is)
+skinparam shadowing false
+skinparam linetype ortho
+
+actor User
+participant "Frontend Scanner\n(React)" as FE
+participant "Backend API\nPOST /api/scans/quick-analyze" as API
+participant "Standards Engine\n(evaluate_freshness_with_standards)" as Standards
+participant "Visual Engine\n(evaluate_visual_spoilage)" as Visual
+participant "Mock Engine\nmodel_inference_mock_v1" as Mock
+database "Prometheus Counter\nfreshfood_scan_events_total" as Metric
+database "ScanFeedbackEvent table" as FeedbackDB
+
+User -> FE: Upload image / select profile
+FE -> API: quick-analyze(image_file|image_url,\ncommodity_group, spoilage_profile, ref mm/px)
+
+API -> Standards: Try standards-based scoring
+alt standards_result != null
+  Standards --> API: assessment_basis=standards_*
+else standards null
+  API -> Visual: Try visual spoilage quantification
+  alt visual_result != null
+    Visual --> API: assessment_basis=visual_spoilage_quantification_v2
+  else visual null
+    API -> Mock: fallback
+    Mock --> API: assessment_basis=model_inference_mock_v1
+  end
+end
+
+API -> Metric: record_scan_event(outcome=completed,\nassessment_basis=...)
+API --> FE: freshness_level, confidence,\nspoilage_ratio_pct, needs_manual_review
+
+alt Backend quick-analyze error
+  FE -> FE: fallback local TFJS inference
+end
+
+User -> FE: Gui feedback dung/sai
+FE -> FeedbackDB: POST /api/scans/feedback-events
+
+note right of API
+As-is:
+- quick-analyze khong can auth
+- quick-analyze khong persist scan history
+end note
+
+@enduml

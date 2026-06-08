@@ -1,0 +1,66 @@
+{
+  "model_version": "mobilenetv2-food-freshness-v2",
+  "input_size": [128, 128],
+  "confidence_threshold": 70,
+  "labels": [
+    "fresh_chicken",
+    "fresh_fish",
+    "fresh_pork",
+    "half_fresh_fish",
+    "half_fresh_pork",
+    "spoiled_chicken",
+    "spoiled_fish",
+    "spoiled_pork",
+    "fresh_apple",
+    "fresh_banana",
+    "fresh_bellpepper",
+    "fresh_carrot",
+    "fresh_cucumber",
+    "fresh_mango",
+    "fresh_orange",
+    "fresh_potato",
+    "fresh_lettuce",
+    "rotten_apple",
+    "rotten_banana",
+    "rotten_carrot",
+    "rotten_cucumber",
+    "rotten_mango",
+    "rotten_orange",
+    "rotten_potato",
+    "rotten_bellpepper",
+    "spoiled_lettuce"
+  ],
+  "display_names": {
+    "fresh_chicken": "Gà tươi",
+    "fresh_fish": "Cá tươi",
+    "fresh_pork": "Thịt heo tươi",
+
+    "half_fresh_fish": "Cá kém tươi",
+    "half_fresh_pork": "Thịt heo kém tươi",
+
+    "spoiled_chicken": "Gà hỏng",
+    "spoiled_fish": "Cá hỏng",
+    "spoiled_pork": "Thịt heo hỏng",
+
+    "fresh_apple": "Táo tươi",
+    "fresh_banana": "Chuối tươi",
+    "fresh_bellpepper": "Ớt chuông tươi",
+    "fresh_carrot": "Cà rốt tươi",
+    "fresh_cucumber": "Dưa leo tươi",
+    "fresh_mango": "Xoài tươi",
+    "fresh_orange": "Cam tươi",
+    "fresh_potato": "Khoai tây tươi",
+    "fresh_lettuce": "Xà lách tươi",
+
+    "rotten_apple": "Táo hỏng",
+    "rotten_banana": "Chuối hỏng",
+    "rotten_carrot": "Cà rốt hỏng",
+    "rotten_cucumber": "Dưa leo hỏng",
+    "rotten_mango": "Xoài hỏng",
+    "rotten_orange": "Cam hỏng",
+    "rotten_potato": "Khoai tây hỏng",
+    "rotten_bellpepper": "Ớt chuông hỏng",
+
+    "spoiled_lettuce": "Xà lách hỏng"
+  }
+}

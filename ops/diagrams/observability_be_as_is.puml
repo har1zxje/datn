@@ -1,0 +1,31 @@
+@startuml
+title Backend Observability (As-Is)
+skinparam shadowing false
+skinparam linetype ortho
+
+node "Backend FastAPI :8001\n(ENABLE_METRICS=True)" as BE
+node "Prometheus :9090" as Prom
+node "Grafana :3001" as Gra
+node "Promtail" as Pt
+node "Loki :3100" as Loki
+folder "test1/backend/logs/*.log" as BELogs
+
+BE --> Prom : scrape /metrics\nfreshfood_http_*\nfreshfood_scan_events_total
+BELogs --> Pt : tail files
+Pt --> Loki : push logs
+
+Gra --> Prom : query metrics
+Gra --> Loki : query logs
+
+note right of Prom
+Scrape target:
+host.docker.internal:8001
+metrics_path: /metrics
+end note
+
+note right of BELogs
+As-is gap:
+Promtail da cau hinh doc log file,\nnhung app chua thay logger file ro rang.
+end note
+
+@enduml

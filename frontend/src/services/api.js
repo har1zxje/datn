@@ -1,19 +1,19 @@
-﻿import axios from 'axios';
+import axios from 'axios';
 import { getNavigationSignal } from './navigationTasks';
+import { safeText } from '../utils/text';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001';
-const PLACEHOLDER_IMAGE = 'https://via.placeholder.com/300?text=FreshFood';
+const PLACEHOLDER_IMAGE = 'https://images.unsplash.com/photo-1542838132-92c53300491e?q=80&w=300&auto=format&fit=crop';
 
 const ACCESS_TOKEN_KEY = 'access_token';
 const REFRESH_TOKEN_KEY = 'refresh_token';
 const USER_KEY = 'user';
 const AUTH_EXPIRED_EVENT = 'freshfood:auth-expired';
+export const PRODUCT_SYNC_EVENT = 'nutrigro:product-sync';
 
-const api = axios.create({
-  baseURL: API_BASE_URL,
-});
-
+const api = axios.create({ baseURL: API_BASE_URL });
 let refreshPromise = null;
+const MAX_PRODUCTS_PER_REQUEST = 100;
 
 export const getAccessToken = () => localStorage.getItem(ACCESS_TOKEN_KEY);
 export const getRefreshToken = () => localStorage.getItem(REFRESH_TOKEN_KEY);
@@ -21,7 +21,6 @@ export const getRefreshToken = () => localStorage.getItem(REFRESH_TOKEN_KEY);
 export const getStoredUser = () => {
   const savedUser = localStorage.getItem(USER_KEY);
   if (!savedUser || !getAccessToken()) return null;
-
   try {
     return JSON.parse(savedUser);
   } catch {
@@ -44,14 +43,13 @@ export const clearAuthSession = ({ redirect = false, notify = false } = {}) => {
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
-  if (notify) {
-    notifyAuthExpired();
-  }
-
+  if (notify) notifyAuthExpired();
   if (redirect && window.location.pathname !== '/auth') {
     window.location.assign('/auth');
   }
 };
+
+const isAdminSession = () => Boolean(getStoredUser()?.is_admin);
 
 const apiError = (error, fallback) => {
   if (error?.detail) return error;
@@ -63,25 +61,18 @@ const apiError = (error, fallback) => {
 const refreshAuthToken = async () => {
   const refresh_token = getRefreshToken();
   if (!refresh_token) {
-    throw new Error('PhiÃªn Ä‘Äƒng nháº­p Ä‘Ã£ háº¿t háº¡n. Vui lÃ²ng Ä‘Äƒng nháº­p láº¡i.');
+    throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
   }
 
-  const response = await axios.post(`${API_BASE_URL}/api/auth/refresh`, {
-    refresh_token,
-  });
-
+  const response = await axios.post(`${API_BASE_URL}/api/auth/refresh`, { refresh_token });
   saveAuthSession(response.data);
   return response.data.access_token;
 };
 
 api.interceptors.request.use((config) => {
   const token = getAccessToken();
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  if (!config.signal) {
-    config.signal = getNavigationSignal();
-  }
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  if (!config.signal) config.signal = getNavigationSignal();
   return config;
 });
 
@@ -104,9 +95,7 @@ api.interceptors.response.use(
 
     try {
       if (!refreshPromise) {
-        refreshPromise = refreshAuthToken().finally(() => {
-          refreshPromise = null;
-        });
+        refreshPromise = refreshAuthToken().finally(() => { refreshPromise = null; });
       }
 
       const newAccessToken = await refreshPromise;
@@ -124,48 +113,85 @@ api.interceptors.response.use(
 
 export const formatCurrency = (value) => {
   const number = Number(value || 0);
-  return `${number.toLocaleString('vi-VN')}Ä‘`;
+  return `${number.toLocaleString('vi-VN')} đ`;
+};
+
+const resolveImageUrl = (rawValue) => {
+  const value = safeText(rawValue);
+  if (!value) return '';
+  if (/^(https?:)?\/\//i.test(value) || value.startsWith('data:')) return value;
+  if (value.startsWith('/')) return `${API_BASE_URL}${value}`;
+  return `${API_BASE_URL}/${value}`;
+};
+
+const resolveDownloadFilename = (contentDisposition, fallback) => {
+  const headerValue = safeText(contentDisposition);
+  if (!headerValue) return fallback;
+
+  const utf8Match = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch {
+      return utf8Match[1];
+    }
+  }
+
+  const plainMatch = headerValue.match(/filename="?([^"]+)"?/i);
+  return plainMatch?.[1] || fallback;
 };
 
 export const normalizeProduct = (product = {}) => {
   const priceNumber = Number(product.discount_price ?? product.price ?? 0);
-  const categoryName =
-    product.category?.name ||
-    product.category_name ||
-    product.category ||
-    (product.category_id ? `Danh má»¥c #${product.category_id}` : 'Sáº£n pháº©m');
+  const resolvedCategoryId = product.category_id || product.category?.id || null;
+  const categoryName = product.category?.name || product.category_name || product.category || '';
+  const resolvedImageUrl =
+    resolveImageUrl(product.image_url) ||
+    resolveImageUrl(product.img) ||
+    PLACEHOLDER_IMAGE;
 
   return {
     ...product,
+    name: safeText(product.name),
+    description: safeText(product.description),
     price: priceNumber,
     priceText: formatCurrency(priceNumber),
-    img: product.img || product.image_url || PLACEHOLDER_IMAGE,
-    image_url: product.image_url || product.img || PLACEHOLDER_IMAGE,
-    category: categoryName,
+    img: resolvedImageUrl,
+    image_url: resolvedImageUrl,
+    category_id: resolvedCategoryId,
+    category: safeText(categoryName, ''),
     stock: product.stock ?? product.quantity ?? 0,
     quantity: product.quantity ?? product.stock ?? 0,
     unit: product.unit || 'kg',
     stock_status: product.stock_status || ((product.quantity ?? product.stock ?? 0) > 0 ? 'in_stock' : 'out_of_stock'),
+    ai_supported: Boolean(product.ai_supported),
+    ai_class_name: safeText(product.ai_class_name),
   };
 };
+
+export const normalizeCategory = (category = {}) => ({
+  ...category,
+  id: Number(category.id || 0),
+  name: safeText(category.name || category.label, 'Danh mục'),
+});
 
 export const normalizeOrderStatus = (status) => {
   const normalized = String(status || '').trim().toLowerCase();
   const labels = {
-    pending: 'Chá» xÃ¡c nháº­n',
-    'chá» xÃ¡c nháº­n': 'Chá» xÃ¡c nháº­n',
-    confirmed: 'ÄÃ£ xÃ¡c nháº­n',
-    'Ä‘Ã£ xÃ¡c nháº­n': 'ÄÃ£ xÃ¡c nháº­n',
-    shipped: 'Äang giao',
-    'Ä‘ang giao': 'Äang giao',
-    delivered: 'ÄÃ£ giao',
-    'Ä‘Ã£ giao': 'ÄÃ£ giao',
-    cancelled: 'ÄÃ£ há»§y',
-    'Ä‘Ã£ há»§y': 'ÄÃ£ há»§y',
-    returned: 'ÄÃ£ tráº£',
-    'Ä‘Ã£ tráº£': 'ÄÃ£ tráº£',
+    pending: 'Chờ xác nhận',
+    'cho xac nhan': 'Chờ xác nhận',
+    confirmed: 'Đã xác nhận',
+    'da xac nhan': 'Đã xác nhận',
+    shipped: 'Đang giao',
+    'dang giao': 'Đang giao',
+    delivered: 'Đã giao',
+    'da giao': 'Đã giao',
+    cancelled: 'Đã hủy',
+    'da huy': 'Đã hủy',
+    returned: 'Đã trả',
+    'da tra': 'Đã trả',
   };
-  return labels[normalized] || status || 'KhÃ´ng rÃµ';
+  return labels[normalized] || safeText(status) || 'Không rõ';
 };
 
 export const normalizeOrderItem = (item = {}) => {
@@ -173,35 +199,157 @@ export const normalizeOrderItem = (item = {}) => {
   return {
     ...item,
     product,
-    product_name: product?.name || item.product_name || `Sáº£n pháº©m #${item.product_id}`,
+    product_name: safeText(product?.name || item.product_name || `Sản phẩm #${item.product_id}`),
+    ai_supported: Boolean(item.ai_supported ?? product?.ai_supported),
+    ai_class_name: safeText(item.ai_class_name || product?.ai_class_name),
     quantity: Number(item.quantity || 0),
     price_at_purchase: Number(item.price_at_purchase || 0),
     subtotal: Number(item.subtotal || 0),
   };
 };
 
-export const normalizeOrder = (order = {}) => ({
-  ...order,
-  status: order.status?.value || order.status,
-  subtotal: Number(order.subtotal || 0),
-  tax: Number(order.tax || 0),
-  shipping_fee: Number(order.shipping_fee || 0),
-  discount: Number(order.discount || 0),
-  total: Number(order.total ?? order.total_price ?? 0),
-  items: Array.isArray(order.items) ? order.items.map(normalizeOrderItem) : [],
+export const normalizeOrder = (order = {}) => {
+  const owner = order.owner || {};
+  const customerName = safeText(order.customer_name || owner.full_name || owner.username, '');
+  const customerEmail = safeText(order.customer_email || owner.email || '', '');
+
+  return {
+    ...order,
+    status: order.status?.value || order.status,
+    subtotal: Number(order.subtotal || 0),
+    tax: Number(order.tax || 0),
+    shipping_fee: Number(order.shipping_fee || 0),
+    discount: Number(order.discount || 0),
+    total: Number(order.total ?? order.total_price ?? 0),
+    order_type: safeText(order.order_type, 'normal'),
+    replacement_parent_order_id: order.replacement_parent_order_id ?? null,
+    items: Array.isArray(order.items) ? order.items.map(normalizeOrderItem) : [],
+    customerName: customerName || customerEmail || 'Ẩn danh',
+    customerEmail,
+    freshness_reward_points: Number(order.freshness_reward_points || 50),
+    freshness_confirmation_available: Boolean(order.freshness_confirmation_available),
+    freshness_confirmation_completed: Boolean(order.freshness_confirmation_completed),
+    freshness_confirmation_expired: Boolean(order.freshness_confirmation_expired),
+    freshness_confirmation_expires_at: order.freshness_confirmation_expires_at || null,
+  };
+};
+
+const normalizeOrderListResponse = (payload = {}) => ({
+  items: Array.isArray(payload.items) ? payload.items.map(normalizeOrder) : [],
+  total: Number(payload.total || 0),
+  page: Number(payload.page || 1),
+  limit: Number(payload.limit || 0),
+  total_pages: Number(payload.total_pages || 1),
+  has_next: Boolean(payload.has_next),
+  status_counts: payload.status_counts || {},
 });
+
+const normalizeNotification = (item = {}) => ({
+  ...item,
+  title: safeText(item.title, 'Thong bao'),
+  message: safeText(item.message),
+  notification_type: safeText(item.notification_type, 'general'),
+  is_read: Boolean(item.is_read),
+});
+
+const normalizeFreshnessReview = (item = {}) => ({
+  ...item,
+  image_url: resolveImageUrl(item.image_url),
+  ai_label: safeText(item.ai_label),
+  customer_display_name: safeText(item.customer_display_name, 'Khach hang'),
+  customer_area: safeText(item.customer_area, 'Khu vuc khac'),
+});
+
+const normalizeAdminFeedback = (item = {}) => ({
+  ...item,
+  image_url: resolveImageUrl(item.image_url) || resolveImageUrl(item.scan?.image_url) || '',
+  notes: safeText(item.notes),
+  source: safeText(item.source, 'unknown'),
+  predicted_label: safeText(item.predicted_label, 'unknown'),
+  predicted_status: safeText(item.predicted_status, 'unknown'),
+  corrected_label: safeText(item.corrected_label),
+  corrected_status: safeText(item.corrected_status),
+  user: item.user
+    ? {
+        ...item.user,
+        username: safeText(item.user.username),
+        full_name: safeText(item.user.full_name),
+        email: safeText(item.user.email),
+      }
+    : null,
+  scan: item.scan
+    ? {
+        ...item.scan,
+        image_url: resolveImageUrl(item.scan.image_url),
+      }
+    : null,
+});
+
+const normalizeAdminStats = (payload = {}) => ({
+  ...payload,
+  low_stock_items: Array.isArray(payload.low_stock_items)
+    ? payload.low_stock_items.map((item) => ({
+        ...item,
+        image_url: resolveImageUrl(item.image_url),
+        name: safeText(item.name, 'San pham'),
+        category_name: safeText(item.category_name, 'Khac'),
+      }))
+    : [],
+  recent_feedback: Array.isArray(payload.recent_feedback)
+    ? payload.recent_feedback.map(normalizeAdminFeedback)
+    : [],
+});
+
+const emitProductSyncEvent = (detail) => {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(PRODUCT_SYNC_EVENT, { detail }));
+};
 
 export const getProducts = async (params = {}) => {
   try {
-    const response = await api.get('/api/products', {
-      params: {
-        limit: 100,
-        ...params,
-      },
-    });
-    return response.data.map(normalizeProduct);
+    const requestedLimit = Number(params.limit);
+    const skip = Number(params.skip || 0);
+    const hasCustomLimit = Number.isFinite(requestedLimit) && requestedLimit > 0;
+    const targetLimit = hasCustomLimit ? Math.floor(requestedLimit) : MAX_PRODUCTS_PER_REQUEST;
+    const baseParams = { ...params };
+    delete baseParams.limit;
+    delete baseParams.skip;
+
+    if (targetLimit <= MAX_PRODUCTS_PER_REQUEST) {
+      const response = await api.get('/api/products', {
+        params: { ...baseParams, skip, limit: targetLimit },
+      });
+      return Array.isArray(response.data) ? response.data.map(normalizeProduct) : [];
+    }
+
+    const products = [];
+    let currentSkip = skip;
+
+    while (products.length < targetLimit) {
+      const batchLimit = Math.min(MAX_PRODUCTS_PER_REQUEST, targetLimit - products.length);
+      const response = await api.get('/api/products', {
+        params: { ...baseParams, skip: currentSkip, limit: batchLimit },
+      });
+      const batch = Array.isArray(response.data) ? response.data.map(normalizeProduct) : [];
+      products.push(...batch);
+
+      if (batch.length < batchLimit) break;
+      currentSkip += batch.length;
+    }
+
+    return products;
   } catch (error) {
-    console.error('Lá»—i káº¿t ná»‘i API:', error);
+    console.error('Product API error:', error);
+    return [];
+  }
+};
+
+export const getCategories = async () => {
+  try {
+    const response = await api.get('/api/products/categories', { params: { limit: 100 } });
+    return response.data.map(normalizeCategory);
+  } catch (error) {
+    console.error('Category API error:', error);
     return [];
   }
 };
@@ -216,7 +364,7 @@ export const register = async (userData) => {
     const response = await api.post('/api/auth/register', userData);
     return response.data;
   } catch (error) {
-    throw apiError(error, 'Lá»—i Ä‘Äƒng kÃ½');
+    throw apiError(error, 'Lỗi đăng ký');
   }
 };
 
@@ -226,47 +374,111 @@ export const login = async (username, password) => {
     saveAuthSession(response.data);
     return response.data;
   } catch (error) {
-    throw apiError(error, 'Lá»—i Ä‘Äƒng nháº­p');
+    throw apiError(error, 'Lỗi đăng nhập');
   }
 };
 
-export const logout = () => {
-  clearAuthSession();
-};
+export const logout = () => clearAuthSession();
 
 export const getAdminStats = async () => {
   try {
     const response = await api.get('/api/admin/stats');
-    return response.data;
+    return normalizeAdminStats(response.data);
   } catch (error) {
-    throw apiError(error, 'Lá»—i láº¥y thá»‘ng kÃª');
+    throw apiError(error, 'Lỗi lấy thống kê');
   }
+};
+
+export const getAdminFeedbackEvents = async (params = {}) => {
+  try {
+    const response = await api.get('/api/admin/feedback-events', { params });
+    return {
+      ...response.data,
+      items: Array.isArray(response.data?.items) ? response.data.items.map(normalizeAdminFeedback) : [],
+      total: Number(response.data?.total || 0),
+      unread_count: Number(response.data?.unread_count || 0),
+      page: Number(response.data?.page || 1),
+      limit: Number(response.data?.limit || 12),
+      total_pages: Number(response.data?.total_pages || 1),
+      has_next: Boolean(response.data?.has_next),
+    };
+  } catch (error) {
+    throw apiError(error, 'Khong the tai danh sach AI feedback');
+  }
+};
+
+export const markAdminFeedbackRead = async (feedbackId) => {
+  try {
+    const response = await api.put(`/api/admin/feedback-events/${feedbackId}/read`);
+    return normalizeAdminFeedback(response.data);
+  } catch (error) {
+    throw apiError(error, 'Khong the cap nhat trang thai feedback');
+  }
+};
+
+const buildProductRequestBody = (productData = {}) => {
+  if (productData instanceof FormData) return productData;
+
+  const shouldUseMultipart = typeof File !== 'undefined' && productData?.image_file instanceof File;
+  if (!shouldUseMultipart) return productData;
+
+  const formData = new FormData();
+  Object.entries(productData).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return;
+    if (key === 'image_file') {
+      formData.append('image_file', value);
+      return;
+    }
+    formData.append(key, String(value));
+  });
+  return formData;
 };
 
 export const addProduct = async (productData) => {
   try {
-    const response = await api.post('/api/products/add', productData);
+    const response = await api.post('/api/products/add', buildProductRequestBody(productData));
+    const updatedProduct = normalizeProduct(response.data?.product || response.data);
+    emitProductSyncEvent({ type: 'upsert', product: updatedProduct });
     return response.data;
   } catch (error) {
-    throw apiError(error, 'Lá»—i thÃªm sáº£n pháº©m');
+    throw apiError(error, 'Không thể thêm sản phẩm');
+  }
+};
+
+export const updateProduct = async (productId, productData) => {
+  try {
+    const response = await api.put(`/api/products/${productId}`, buildProductRequestBody(productData));
+    const updatedProduct = normalizeProduct(response.data?.product || response.data);
+    emitProductSyncEvent({ type: 'upsert', product: updatedProduct });
+    return response.data;
+  } catch (error) {
+    throw apiError(error, 'Không thể cập nhật sản phẩm');
   }
 };
 
 export const deleteProduct = async (productId) => {
   try {
     const response = await api.delete(`/api/products/${productId}`);
+    emitProductSyncEvent({ type: 'remove', productId });
     return response.data;
   } catch (error) {
-    throw apiError(error, 'Lá»—i xÃ³a sáº£n pháº©m');
+    throw apiError(error, 'Không thể xóa sản phẩm');
   }
 };
 
-export const getAllUsers = async () => {
+export const getAdminUsersPage = async (params = {}) => {
   try {
-    const response = await api.get('/api/admin/users');
-    return response.data;
+    const response = await api.get('/api/admin/users/paginated', { params });
+    return {
+      items: Array.isArray(response.data?.items) ? response.data.items : [],
+      total: Number(response.data?.total || 0),
+      page: Number(response.data?.page || 1),
+      limit: Number(response.data?.limit || 12),
+      total_pages: Number(response.data?.total_pages || 1),
+      has_next: Boolean(response.data?.has_next),
+    };
   } catch (error) {
-    throw apiError(error, 'Lá»—i láº¥y danh sÃ¡ch ngÆ°á»i dÃ¹ng');
+    throw apiError(error, 'Khong the tai danh sach nguoi dung');
   }
 };
 
@@ -275,16 +487,25 @@ export const deleteUser = async (userId) => {
     const response = await api.delete(`/api/admin/users/${userId}`);
     return response.data;
   } catch (error) {
-    throw apiError(error, 'Lá»—i xÃ³a ngÆ°á»i dÃ¹ng');
+    throw apiError(error, 'Lỗi xóa người dùng');
   }
 };
 
-export const getAllOrders = async () => {
+export const updateUserRole = async (userId, role) => {
   try {
-    const response = await api.get('/api/admin/orders');
-    return response.data.map(normalizeOrder);
+    const response = await api.put(`/api/admin/users/${userId}/role`, { role });
+    return response.data;
   } catch (error) {
-    throw apiError(error, 'Lá»—i láº¥y danh sÃ¡ch Ä‘Æ¡n hÃ ng');
+    throw apiError(error, 'Không thể cập nhật quyền người dùng');
+  }
+};
+
+export const getAdminOrdersPage = async (params = {}) => {
+  try {
+    const response = await api.get('/api/admin/orders/paginated', { params });
+    return normalizeOrderListResponse(response.data);
+  } catch (error) {
+    throw apiError(error, 'Loi tai danh sach don hang');
   }
 };
 
@@ -293,18 +514,28 @@ export const getOrderDetail = async (orderId) => {
     const response = await api.get(`/api/admin/orders/${orderId}`);
     return normalizeOrder(response.data);
   } catch (error) {
-    throw apiError(error, 'Lá»—i láº¥y chi tiáº¿t Ä‘Æ¡n hÃ ng');
+    throw apiError(error, 'Lỗi lấy chi tiết đơn hàng');
   }
 };
 
 export const updateOrderStatus = async (orderId, newStatus) => {
   try {
-    const response = await api.put(`/api/admin/orders/${orderId}/status`, {
+    const response = await api.put(`/api/admin/orders/${orderId}/status`, { new_status: newStatus });
+    return response.data;
+  } catch (error) {
+    throw apiError(error, 'Lỗi cập nhật trạng thái');
+  }
+};
+
+export const bulkUpdateOrderStatus = async (orderIds, newStatus) => {
+  try {
+    const response = await api.put('/api/admin/orders/bulk-status', {
+      order_ids: orderIds,
       new_status: newStatus,
     });
     return response.data;
   } catch (error) {
-    throw apiError(error, 'Lá»—i cáº­p nháº­t tráº¡ng thÃ¡i');
+    throw apiError(error, 'Loi cap nhat trang thai hang loat');
   }
 };
 
@@ -313,43 +544,134 @@ export const deleteOrder = async (orderId) => {
     const response = await api.delete(`/api/admin/orders/${orderId}`);
     return response.data;
   } catch (error) {
-    throw apiError(error, 'Lá»—i xÃ³a Ä‘Æ¡n hÃ ng');
+    throw apiError(error, 'Lỗi xóa đơn hàng');
   }
 };
 
 export const createOrder = async (orderData) => {
+  if (isAdminSession()) {
+    throw { detail: 'Tài khoản admin chỉ dùng để quản trị, không thể mua hoặc đặt hàng' };
+  }
   try {
     const response = await api.post('/api/orders', orderData);
     return normalizeOrder(response.data);
   } catch (error) {
-    throw apiError(error, 'Lá»—i táº¡o Ä‘Æ¡n hÃ ng');
+    throw apiError(error, 'Lỗi tạo đơn hàng');
   }
 };
 
 export const getUserOrders = async () => {
+  if (isAdminSession()) {
+    return [];
+  }
   try {
     const response = await api.get('/api/orders');
     return response.data.map(normalizeOrder);
   } catch (error) {
-    throw apiError(error, 'Lá»—i láº¥y danh sÃ¡ch Ä‘Æ¡n hÃ ng');
+    throw apiError(error, 'Loi lay danh sach don hang');
+  }
+};
+
+export const getNotifications = async (params = {}) => {
+  try {
+    const response = await api.get('/api/notifications', { params });
+    return Array.isArray(response.data) ? response.data.map(normalizeNotification) : [];
+  } catch (error) {
+    throw apiError(error, 'Khong the tai thong bao');
+  }
+};
+
+export const markNotificationRead = async (notificationId) => {
+  try {
+    const response = await api.put(`/api/notifications/${notificationId}/read`);
+    return normalizeNotification(response.data);
+  } catch (error) {
+    throw apiError(error, 'Khong the cap nhat thong bao');
+  }
+};
+
+export const getOrderFreshnessEligibility = async (orderId) => {
+  try {
+    const response = await api.get(`/api/orders/${orderId}/freshness-confirmation`);
+    return {
+      ...response.data,
+      items: Array.isArray(response.data?.items) ? response.data.items.map(normalizeOrderItem) : [],
+      reward_points: Number(response.data?.reward_points || 0),
+      is_available: Boolean(response.data?.is_available),
+      is_expired: Boolean(response.data?.is_expired),
+      already_confirmed: Boolean(response.data?.already_confirmed),
+    };
+  } catch (error) {
+    throw apiError(error, 'Khong the tai thong tin xac nhan do tuoi');
+  }
+};
+
+export const submitOrderFreshnessConfirmation = async (orderId, payload) => {
+  try {
+    const formData = new FormData();
+    formData.append('payload', JSON.stringify({ reviews: payload.reviews || [] }));
+    (payload.files || []).forEach(({ field, file }) => {
+      if (file instanceof File) {
+        formData.append(field, file);
+      }
+    });
+
+    const response = await api.post(`/api/orders/${orderId}/freshness-confirmation`, formData);
+    return {
+      ...response.data,
+      awarded_points: Number(response.data?.awarded_points || 0),
+      loyalty_points: Number(response.data?.loyalty_points || 0),
+      has_low_score_reviews: Boolean(response.data?.has_low_score_reviews),
+      reviews: Array.isArray(response.data?.reviews) ? response.data.reviews.map(normalizeFreshnessReview) : [],
+    };
+  } catch (error) {
+    throw apiError(error, 'Khong the gui xac nhan do tuoi');
+  }
+};
+
+export const createFreshnessComplaint = async (orderId, payload) => {
+  try {
+    const response = await api.post(`/api/orders/${orderId}/freshness-complaints`, payload);
+    return response.data;
+  } catch (error) {
+    throw apiError(error, 'Khong the tao yeu cau boi thuong');
+  }
+};
+
+export const getProductFreshnessReviews = async (productId) => {
+  try {
+    const response = await api.get(`/api/products/${productId}/freshness-reviews`);
+    return {
+      avg_score: response.data?.avg_score == null ? null : Number(response.data.avg_score),
+      total_reviews: Number(response.data?.total_reviews || 0),
+      reviews: Array.isArray(response.data?.reviews) ? response.data.reviews.map(normalizeFreshnessReview) : [],
+    };
+  } catch (error) {
+    throw apiError(error, 'Khong the tai danh gia do tuoi');
   }
 };
 
 export const updateUserOrder = async (orderId, orderData) => {
+  if (isAdminSession()) {
+    throw { detail: 'Tài khoản admin không thể chỉnh sửa đơn hàng cá nhân' };
+  }
   try {
     const response = await api.put(`/api/orders/${orderId}`, orderData);
     return normalizeOrder(response.data);
   } catch (error) {
-    throw apiError(error, 'Lá»—i cáº­p nháº­t Ä‘Æ¡n hÃ ng');
+    throw apiError(error, 'Lỗi cập nhật đơn hàng');
   }
 };
 
 export const cancelUserOrder = async (orderId) => {
+  if (isAdminSession()) {
+    throw { detail: 'Tài khoản admin không thể hủy đơn hàng cá nhân' };
+  }
   try {
     const response = await api.post(`/api/orders/${orderId}/cancel`);
     return response.data;
   } catch (error) {
-    throw apiError(error, 'Lá»—i há»§y Ä‘Æ¡n hÃ ng');
+    throw apiError(error, 'Lỗi hủy đơn hàng');
   }
 };
 
@@ -358,7 +680,7 @@ export const getUserProfile = async () => {
     const response = await api.get('/api/auth/me');
     return response.data;
   } catch (error) {
-    throw apiError(error, 'Lá»—i láº¥y thÃ´ng tin há»“ sÆ¡');
+    throw apiError(error, 'Lỗi lấy thông tin hồ sơ');
   }
 };
 
@@ -367,10 +689,209 @@ export const updateUserProfile = async (userData) => {
     const response = await api.put('/api/auth/me', userData);
     return response.data;
   } catch (error) {
-    throw apiError(error, 'Lá»—i cáº­p nháº­t thÃ´ng tin');
+    throw apiError(error, 'Không thể cập nhật hồ sơ');
+  }
+};
+
+export const requestPasswordReset = async (email) => {
+  try {
+    const response = await api.post('/api/auth/forgot-password', { email });
+    return response.data;
+  } catch (error) {
+    throw apiError(error, 'Không thể gửi yêu cầu đặt lại mật khẩu');
+  }
+};
+
+export const getStockTransactionsPage = async (params = {}) => {
+  try {
+    const response = await api.get('/api/admin/stock-transactions/paginated', { params });
+    return {
+      items: Array.isArray(response.data?.items) ? response.data.items : [],
+      total: Number(response.data?.total || 0),
+      page: Number(response.data?.page || 1),
+      limit: Number(response.data?.limit || 12),
+      total_pages: Number(response.data?.total_pages || 1),
+      has_next: Boolean(response.data?.has_next),
+    };
+  } catch (error) {
+    throw apiError(error, 'Khong the tai lich su giao dich kho');
+  }
+};
+
+export const addStockTransaction = async ({ product_id, type, quantity, note, transaction_date }) => {
+  try {
+    const response = await api.post('/api/admin/stock-transactions', {
+      product_id,
+      type,
+      quantity: Number(quantity),
+      note: note || null,
+      transaction_date: transaction_date || null,
+    });
+    return response.data;
+  } catch (error) {
+    throw apiError(error, 'Lỗi ghi giao dịch kho');
+  }
+};
+
+export const exportStockTransactionsExcel = async (params = {}) => {
+  try {
+    const response = await api.get('/api/admin/stock-transactions/export-excel', {
+      params,
+      responseType: 'blob',
+    });
+    return {
+      blob: response.data,
+      filename: resolveDownloadFilename(
+        response.headers?.['content-disposition'],
+        `stock-transactions-${new Date().toISOString().slice(0, 10)}.xlsx`,
+      ),
+    };
+  } catch (error) {
+    throw apiError(error, 'Khong the xuat file Excel giao dich kho');
+  }
+};
+
+export const importStockTransactionsExcel = async (excelFile) => {
+  try {
+    const formData = new FormData();
+    formData.append('excel_file', excelFile);
+    const response = await api.post('/api/admin/stock-transactions/import-excel', formData);
+    return response.data;
+  } catch (error) {
+    throw apiError(error, 'Khong the nhap file Excel giao dich kho');
+  }
+};
+
+export const getAdminPaymentQRCode = async () => {
+  try {
+    const response = await api.get('/api/admin/payment-qr');
+    if (!response.data) return null;
+    return {
+      ...response.data,
+      image_url: resolveImageUrl(response.data.image_url),
+    };
+  } catch (error) {
+    throw apiError(error, 'Khong the tai ma QR thanh toan');
+  }
+};
+
+export const updateAdminPaymentQRCode = async ({ provider_name, image_file }) => {
+  try {
+    const formData = new FormData();
+    if (provider_name) formData.append('provider_name', provider_name);
+    if (image_file instanceof File) formData.append('image_file', image_file);
+    const response = await api.put('/api/admin/payment-qr', formData);
+    return {
+      ...response.data,
+      image_url: resolveImageUrl(response.data.image_url),
+    };
+  } catch (error) {
+    throw apiError(error, 'Khong the cap nhat ma QR thanh toan');
+  }
+};
+
+export const changePassword = async (payload) => {
+  try {
+    const response = await api.post('/api/auth/change-password', payload);
+    return response.data;
+  } catch (error) {
+    throw apiError(error, 'Không thể đổi mật khẩu');
+  }
+};
+
+// ============ DELIVERY PROFILES ============
+
+export const getDeliveryProfiles = async () => {
+  try {
+    const response = await api.get('/api/delivery-profiles');
+    return response.data;
+  } catch (error) {
+    throw apiError(error, 'Không thể tải danh sách địa chỉ');
+  }
+};
+
+export const createDeliveryProfile = async (data) => {
+  try {
+    const response = await api.post('/api/delivery-profiles', data);
+    return response.data;
+  } catch (error) {
+    throw apiError(error, 'Không thể tạo địa chỉ mới');
+  }
+};
+
+export const updateDeliveryProfile = async (profileId, data) => {
+  try {
+    const response = await api.put(`/api/delivery-profiles/${profileId}`, data);
+    return response.data;
+  } catch (error) {
+    throw apiError(error, 'Không thể cập nhật địa chỉ');
+  }
+};
+
+export const deleteDeliveryProfile = async (profileId) => {
+  try {
+    const response = await api.delete(`/api/delivery-profiles/${profileId}`);
+    return response.data;
+  } catch (error) {
+    throw apiError(error, 'Không thể xóa địa chỉ');
+  }
+};
+
+export const setDefaultDeliveryProfile = async (profileId) => {
+  try {
+    const response = await api.put(`/api/delivery-profiles/${profileId}/set-default`);
+    return response.data;
+  } catch (error) {
+    throw apiError(error, 'Không thể đặt địa chỉ mặc định');
+  }
+};
+
+export const submitScannerFeedback = async (payload) => {
+  try {
+    const response = await api.post('/api/scans/feedback-events', payload);
+    return response.data;
+  } catch (error) {
+    throw apiError(error, 'Khong the gui feedback scanner');
+  }
+};
+
+export const quickAnalyzeScan = async ({
+  imageFile,
+  imageUrl,
+  commodityGroup = 'produce',
+  spoilageProfile = '',
+  referenceWidthMm,
+  referenceWidthPx,
+  tfjsPredictions,
+  orderId,
+}) => {
+  try {
+    const formData = new FormData();
+    if (imageFile instanceof File) {
+      formData.append('image_file', imageFile);
+    } else if (imageUrl) {
+      formData.append('image_url', imageUrl);
+    }
+    formData.append('commodity_group', commodityGroup || 'produce');
+    if (spoilageProfile) formData.append('spoilage_profile', spoilageProfile);
+    if (referenceWidthMm !== undefined && referenceWidthMm !== null && referenceWidthMm !== '') {
+      formData.append('reference_width_mm', String(referenceWidthMm));
+    }
+    if (referenceWidthPx !== undefined && referenceWidthPx !== null && referenceWidthPx !== '') {
+      formData.append('reference_width_px', String(referenceWidthPx));
+    }
+    if (Array.isArray(tfjsPredictions) && tfjsPredictions.length > 0) {
+      formData.append('tfjs_predictions_json', JSON.stringify(tfjsPredictions));
+    }
+    if (orderId !== undefined && orderId !== null && orderId !== '') {
+      formData.append('order_id', String(orderId));
+    }
+
+    const response = await api.post('/api/scans/quick-analyze', formData);
+    return response.data;
+  } catch (error) {
+    throw apiError(error, 'Khong the phan tich nhanh scanner');
   }
 };
 
 export default api;
-
-

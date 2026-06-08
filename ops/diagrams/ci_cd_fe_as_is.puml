@@ -1,0 +1,31 @@
+@startuml
+title Frontend CI/CD (As-Is)
+skinparam shadowing false
+skinparam linetype ortho
+
+actor Dev
+participant "GitHub Repo" as Repo
+participant "GitHub Actions\nfreshfood-ci-cd" as GHA
+participant "frontend-ci\n(Node 20)" as FCI
+participant "build-and-publish-images" as CD
+database "GHCR" as GHCR
+
+Dev -> Repo: Push / Open PR
+Repo -> GHA: Trigger workflow\n(path includes test1/frontend/**)
+GHA -> FCI: Checkout\nnpm ci\nnpm run build
+FCI --> GHA: pass/fail
+
+alt Event = push AND frontend-ci pass\n(and backend-ci pass)
+  GHA -> CD: Build frontend image
+  CD -> GHCR: Push freshfood-frontend:<sha>
+else pull_request
+  GHA -> GHA: Skip image push
+end
+
+note right of CD
+As-is:
+- Build stage dung Docker + nginx
+- Chua co deploy step frontend\n(staging/prod)
+end note
+
+@enduml

@@ -21,15 +21,7 @@ export default {
         },
       },
       fontFamily: {
-        sans: [
-          'Inter',
-          'Roboto',
-          'system-ui',
-          '-apple-system',
-          'BlinkMacSystemFont',
-          'Segoe UI',
-          'sans-serif',
-        ],
+        sans: ['"Be Vietnam Pro"', 'sans-serif'],
       },
       boxShadow: {
         soft: '0 10px 30px rgba(15, 23, 42, 0.08)',

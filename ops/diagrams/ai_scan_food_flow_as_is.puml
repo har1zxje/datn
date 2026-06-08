@@ -1,0 +1,72 @@
+@startuml
+title AI Food Scan Flow (As-Is)
+skinparam shadowing false
+skinparam linetype ortho
+
+actor User
+participant "Scanner Page\n(Scanner.jsx)" as Scanner
+participant "ScannerService\n(TFJS local model)" as TFJS
+participant "frontend/services/api.js" as FEAPI
+participant "FastAPI\n/api/scans/quick-analyze" as ScanRoute
+participant "scans.py" as ScanAPI
+participant "freshness_standards.py" as Standards
+participant "visual_spoilage.py" as Visual
+database "uploads/scans/*" as UploadStore
+database "scan_feedback_events" as FeedbackDB
+
+== Live Camera Path ==
+User -> Scanner: Start camera tab
+Scanner -> TFJS: loadScannerModel()
+loop per frame
+  Scanner -> TFJS: predictFreshness(videoFrame)
+  TFJS --> Scanner: local prediction
+end
+
+== Upload + Quick Analyze Path ==
+User -> Scanner: Upload image + click Analyze
+Scanner -> FEAPI: quickAnalyzeScan(formData)
+FEAPI -> ScanRoute: POST /api/scans/quick-analyze (multipart)
+ScanRoute -> ScanAPI: quick_analyze_scan()
+
+alt image_file provided
+  ScanAPI -> UploadStore: _save_scan_upload()
+  UploadStore --> ScanAPI: /uploads/scans/scan_xxx.jpg
+else image_url provided
+  ScanAPI -> ScanAPI: use given image_url
+end
+
+ScanAPI -> ScanAPI: mock_ai_scan(...)
+ScanAPI -> Standards: evaluate_freshness_with_standards(indicators)
+
+alt standards result available
+  Standards --> ScanAPI: quantified freshness result
+else no standards result
+  ScanAPI -> Visual: evaluate_visual_spoilage(image)
+  alt visual result available
+    Visual --> ScanAPI: spoilage ratio + confidence + review gate
+  else visual unavailable
+    ScanAPI -> ScanAPI: fallback random mock result
+  end
+end
+
+ScanAPI --> FEAPI: QuickScanResponse
+FEAPI --> Scanner: backend result
+Scanner -> Scanner: formatBackendPrediction() + render result
+
+alt backend quick scan error
+  Scanner -> TFJS: predictFreshness(uploadedImage)
+  TFJS --> Scanner: local fallback prediction
+end
+
+== Feedback Path ==
+User -> Scanner: Mark result correct/incorrect
+Scanner -> FEAPI: submitScannerFeedback(payload)
+FEAPI -> ScanRoute: POST /api/scans/feedback-events (Bearer token)
+ScanRoute -> ScanAPI: create_feedback_event()
+ScanAPI -> ScanAPI: validate corrected_label when incorrect
+ScanAPI -> FeedbackDB: insert feedback row + commit
+FeedbackDB --> ScanAPI: persisted
+ScanAPI --> FEAPI: feedback response
+FEAPI --> Scanner: show sent/error state
+
+@enduml

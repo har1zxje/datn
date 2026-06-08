@@ -1,0 +1,67 @@
+@startuml
+title Purchase And Order Flow (As-Is)
+skinparam shadowing false
+skinparam linetype ortho
+
+actor User
+participant "Home / Products Page" as ShopUI
+participant "CartContext\n(in-memory cart)" as CartCtx
+participant "Cart Page\n(Cart.jsx)" as CartUI
+participant "AuthContext\n(user profile)" as AuthCtx
+participant "frontend/services/api.js" as FEAPI
+participant "FastAPI\n/api/orders" as OrderRoute
+participant "auth.py\nget_current_user" as AuthAPI
+participant "orders.py" as OrderAPI
+database "DB: users/products/orders/order_items" as DB
+
+== Browse + Add To Cart ==
+User -> ShopUI: Open shop/home
+ShopUI -> FEAPI: getProducts(), getCategories()
+FEAPI -> DB: SELECT products/categories
+DB --> FEAPI: product list
+FEAPI --> ShopUI: normalized products
+User -> ShopUI: Add product to cart
+ShopUI -> CartCtx: addToCart(product, qty)
+CartCtx --> ShopUI: cart updated in memory
+
+== Checkout ==
+User -> CartUI: Click "Tien hanh thanh toan"
+CartUI -> AuthCtx: read current user profile
+CartUI -> CartUI: validate login, non-admin,\nnon-empty cart, shipping fields
+
+alt Validation failed
+  CartUI --> User: show error message
+else Validation passed
+  CartUI -> FEAPI: createOrder(orderData)
+  FEAPI -> OrderRoute: POST /api/orders (Bearer access token)
+  OrderRoute -> AuthAPI: get_current_user(token)
+  AuthAPI -> DB: validate user from token
+  DB --> AuthAPI: current_user
+  AuthAPI --> OrderAPI: current_user
+  OrderAPI -> OrderAPI: ensure_customer_can_order()
+
+  alt Admin account
+    OrderAPI --> FEAPI: 403 forbidden
+    FEAPI --> CartUI: show admin cannot order
+  else Customer account
+    loop each order item
+      OrderAPI -> DB: SELECT product by id + active
+      DB --> OrderAPI: product row
+      OrderAPI -> OrderAPI: check stock >= quantity
+      alt insufficient stock / missing product
+        OrderAPI --> FEAPI: 400/404 error
+      else valid item
+        OrderAPI -> DB: decrement product.quantity
+      end
+    end
+    OrderAPI -> OrderAPI: compute subtotal + tax(10%) + shipping fee
+    OrderAPI -> DB: INSERT order + order_items + COMMIT
+    DB --> OrderAPI: created order
+    OrderAPI --> FEAPI: OrderDetail response
+    FEAPI --> CartUI: normalized order
+    CartUI -> CartCtx: clearCart()
+    CartUI -> CartUI: navigate('/profile')
+  end
+end
+
+@enduml

@@ -1,0 +1,38 @@
+@startuml
+title FreshFood CI/CD (As-Is)
+skinparam shadowing false
+skinparam linetype ortho
+
+actor Dev
+participant "GitHub Repo" as Repo
+participant "GitHub Actions\nfreshfood-ci-cd" as GHA
+participant "backend-ci\n(Python 3.10 + pytest)" as BCI
+participant "frontend-ci\n(Node 20 + vite build)" as FCI
+participant "build-and-publish-images" as CD
+database "GHCR" as GHCR
+
+Dev -> Repo: Push / Open PR\n(main|master)
+Repo -> GHA: Trigger workflow\n(path filter backend/frontend/workflow)
+
+par CI - Backend
+  GHA -> BCI: Checkout + pip install\npytest -q tests
+  BCI --> GHA: pass/fail
+else CI - Frontend
+  GHA -> FCI: Checkout + npm ci\nnpm run build
+  FCI --> GHA: pass/fail
+end
+
+alt Event = push AND CI green
+  GHA -> CD: Start image job
+  CD -> GHCR: Push freshfood-backend:<sha>
+  CD -> GHCR: Push freshfood-frontend:<sha>
+  CD --> GHA: done
+else Event = pull_request
+  GHA -> GHA: Skip CD image push
+end
+
+note right of CD
+As-is: workflow dung o muc\nbuild + push image, chua co\nstep deploy staging/prod.
+end note
+
+@enduml

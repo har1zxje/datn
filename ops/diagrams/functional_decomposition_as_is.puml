@@ -1,0 +1,36 @@
+@startwbs
+title FreshFood AI - Functional Decomposition (As-Is)
+skinparam shadowing false
+
+* F0 FreshFood AI Platform
+** F1 Khach hang
+*** Dang ky, dang nhap, quan ly tai khoan
+*** Xem/tim loc san pham va xem chi tiet
+*** Gio hang, dat hang, theo doi don, sua/huy don cho xac nhan
+*** AI Scanner (camera/upload) va gui feedback ket qua
+*** Chatbot goi n8n + goi y san pham
+
+** F2 Quan tri he thong
+*** Dashboard thong ke tong quan
+*** Quan ly nguoi dung (xem, doi vai tro, xoa)
+*** Quan ly san pham (them, sua, an/xoa mem, upload anh)
+*** Quan ly don hang (xem, cap nhat trang thai, xoa)
+
+** F3 API Backend
+*** Auth APIs: /api/auth/*
+*** Product APIs: /api/products/* + review
+*** Order APIs: /api/orders/* + luong admin
+*** Scan APIs: /api/scans/* + quick-analyze + feedback
+
+** F4 Du lieu va luu tru
+*** CSDL SQLAlchemy (SQLite/PostgreSQL)
+*** Thu muc uploads (products, scans)
+*** Khoi tao bang va bo sung cot metadata san pham
+
+** F5 Van hanh va chat luong
+*** Health check, validation handler
+*** Observability: /metrics (request + scan metrics)
+*** CI/CD: test backend, build frontend, build/push Docker images
+*** Train model MobileNetV2 + xuat labels cho frontend
+
+@endwbs

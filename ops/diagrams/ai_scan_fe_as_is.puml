@@ -1,0 +1,42 @@
+@startuml
+title AI Scan - Frontend Flow (As-Is)
+skinparam shadowing false
+skinparam linetype ortho
+
+actor User
+participant "Scanner Page\n(Scanner.jsx)" as Page
+participant "Scanner Service\n(ScannerService.js)" as Service
+participant "Local TFJS Model\n/tfjs_model/model.json" as TFJS
+participant "API Client\n(api.js)" as ApiClient
+
+User -> Page: Mo scanner
+Page -> Service: loadScannerModel()
+Service -> TFJS: fetch labels.json + loadGraphModel(model.json)
+TFJS --> Service: model loaded
+Service --> Page: modelRef ready
+
+alt Camera live mode
+  User -> Page: Bat camera
+  loop Moi frame
+    Page -> Service: predictFreshness(videoFrame)
+    Service -> TFJS: model.predict()
+    TFJS --> Service: raw probs
+    Service --> Page: label + confidence + status
+  end
+else Upload mode
+  User -> Page: Chon anh + spoilage profile
+  Page -> ApiClient: quickAnalyzeScan(formData)
+  ApiClient --> Page: quick-analyze response
+
+  alt quick-analyze loi
+    Page -> Service: predictFreshness(uploadedImage)
+    Service -> TFJS: model.predict()
+    TFJS --> Service: fallback probs
+    Service --> Page: fallback local result
+  end
+end
+
+User -> Page: Feedback dung/sai
+Page -> ApiClient: submitScannerFeedback(payload)
+
+@enduml

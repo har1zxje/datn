@@ -11,12 +11,35 @@ sys.path.append(current_dir)
 from database import Base, SessionLocal, engine
 import models
 from utils.auth import hash_password
+from utils.ai_support import infer_ai_class_name
 
 
 def slugify(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", value)
     ascii_value = normalized.encode("ascii", "ignore").decode("ascii")
     return re.sub(r"[^a-zA-Z0-9]+", "-", ascii_value.lower()).strip("-") or "item"
+
+
+CATEGORY_STOCK_NOTES = {
+    "in_stock": "con hang voi so luong on dinh",
+    "low_stock": "sap het hang, nen dat som de giu ton",
+    "out_of_stock": "tam het hang va se duoc bo sung trong dot tiep theo",
+}
+
+
+def build_product_description(
+    name: str,
+    category_name: str,
+    unit: str,
+    origin: str,
+    stock_status: str,
+) -> str:
+    stock_note = CATEGORY_STOCK_NOTES.get(stock_status, "dang cap nhat trang thai kho")
+    return (
+        f"{name} duoc tuyen chon tu nguon cung cap uy tin va kiem soat chat luong theo tung lo hang. "
+        f"San pham phu hop cho bua an hang ngay, de ket hop linh hoat voi nhieu cach che bien trong gia dinh. "
+        f"Dong goi theo don vi {unit}, xuat xu {origin}, hien {stock_note} tai he thong NutriGro."
+    )
 
 
 def seed_data():
@@ -113,21 +136,18 @@ def seed_data():
             ("Lá nguyệt quế khô 20g", "Gia vị & Nguyên liệu nấu ăn", 35000, "gói", 14, "in_stock", 4.6, "https://placehold.co/600x600/f8fafc/166534?text=La+nguyet+que", "Việt Nam"),
         ]
 
-        status_labels = {
-            "in_stock": "Còn hàng",
-            "low_stock": "Sắp hết hàng",
-            "out_of_stock": "Tạm hết hàng",
-        }
-
         products = []
         for name, category_name, price, unit, quantity, stock_status, rating, image_url, origin in products_data + cooking_products_data:
+            ai_class_name = infer_ai_class_name(name)
             product = models.Product(
                 name=name,
                 slug=slugify(name),
-                description=(
-                    f"{name} thuộc dòng thực phẩm sạch cao cấp FreshFood. "
-                    f"Đơn vị tính: {unit}. Xuất xứ: {origin}. "
-                    f"Tình trạng kho: {status_labels.get(stock_status, stock_status)}."
+                description=build_product_description(
+                    name=name,
+                    category_name=category_name,
+                    unit=unit,
+                    origin=origin,
+                    stock_status=stock_status,
                 ),
                 category_id=categories[category_name].id,
                 price=Decimal(price),
@@ -141,6 +161,8 @@ def seed_data():
                 review_count=0,
                 origin=origin,
                 is_featured=rating >= 4.8,
+                ai_supported=bool(ai_class_name),
+                ai_class_name=ai_class_name,
                 harvest_date=datetime.datetime.utcnow(),
             )
             db.add(product)
