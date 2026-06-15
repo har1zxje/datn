@@ -18,7 +18,7 @@ import { useAppSettings } from '../../context/AppSettingsContext';
 import { sendChatMessage } from '../../services/chatbot';
 import MarkdownMessage from './MarkdownMessage';
 
-const BOT_AVATAR = 'https://api.dicebear.com/7.x/bottts/svg?seed=NutriGro';
+const BOT_AVATAR = 'https://api.dicebear.com/7.x/bottts/svg?seed=FreshFood';
 
 const getHistoryOwnerId = (user, currentUserId) =>
   currentUserId || (user ? String(user.id ?? user.username ?? user.email) : 'guest');
@@ -193,7 +193,7 @@ const ChatWidget = ({ onSendMessage = sendChatMessage }) => {
       <AnimatePresence>
         {isOpen && (
           <motion.section
-            aria-label="NutriGro AI chat"
+            aria-label="FreshFood AI chat"
             initial={{ opacity: 0, y: 18, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 14, scale: 0.96 }}
@@ -204,7 +204,7 @@ const ChatWidget = ({ onSendMessage = sendChatMessage }) => {
             <header className="flex items-center justify-between bg-emerald-600 px-5 py-4">
               <div className="flex items-center space-x-3">
                 <div className="relative">
-                  <img className="h-10 w-10 rounded-full bg-white p-1" src={BOT_AVATAR} alt="NutriGro AI Bot" />
+                  <img className="h-10 w-10 rounded-full bg-white p-1" src={BOT_AVATAR} alt="FreshFood AI Bot" />
                   <span className="absolute bottom-0 right-0 block h-2.5 w-2.5 rounded-full bg-amber-400 ring-2 ring-white" />
                 </div>
                 <div>
@@ -236,7 +236,7 @@ const ChatWidget = ({ onSendMessage = sendChatMessage }) => {
                     <img
                       className="h-7 w-7 shrink-0 rounded-full bg-white p-0.5 shadow-sm ring-1 ring-gray-200"
                       src={BOT_AVATAR}
-                      alt="NutriGro AI"
+                      alt="FreshFood AI"
                     />
                   )}
                   <div
@@ -264,7 +264,7 @@ const ChatWidget = ({ onSendMessage = sendChatMessage }) => {
                     <img
                       className="h-7 w-7 shrink-0 rounded-full bg-white p-0.5 shadow-sm ring-1 ring-gray-200"
                       src={BOT_AVATAR}
-                      alt="NutriGro AI"
+                      alt="FreshFood AI"
                     />
                     <div className="inline-flex max-w-[82%] items-center gap-2 rounded-2xl rounded-bl-none border border-gray-200 bg-white p-3.5 text-sm text-gray-600 shadow-sm">
                       <Loader2 className="animate-spin text-emerald-600" size={16} />

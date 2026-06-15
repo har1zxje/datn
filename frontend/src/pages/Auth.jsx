@@ -1,12 +1,10 @@
 import React, { useState } from 'react';
 import { Eye, EyeOff, Leaf, ShieldCheck, Sparkles } from 'lucide-react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useAppSettings } from '../context/AppSettingsContext';
 import { requestPasswordReset } from '../services/api';
 import { safeText } from '../utils/text';
-
-const VN_PHONE_REGEX = /^0[0-9]{9}$/;
 
 const BrandBullet = ({ icon: Icon, text }) => (
   <div className="flex items-start gap-3 rounded-[22px] border border-white/60 bg-white/72 px-4 py-4 shadow-[0_12px_28px_rgba(15,23,42,0.06)]">
@@ -17,53 +15,53 @@ const BrandBullet = ({ icon: Icon, text }) => (
   </div>
 );
 
+const emptyForm = {
+  username: '',
+  email: '',
+  password: '',
+  confirmPassword: '',
+  name: '',
+};
+
 const Auth = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotLoading, setForgotLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [formData, setFormData] = useState({
-    username: '',
-    email: '',
-    password: '',
-    name: '',
-    phone: '',
-  });
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [formData, setFormData] = useState(emptyForm);
   const [message, setMessage] = useState(null);
-  const [phoneError, setPhoneError] = useState('');
+  const [confirmPasswordError, setConfirmPasswordError] = useState('');
 
   const { login, register } = useAuth();
   const { t } = useAppSettings();
   const navigate = useNavigate();
-  const location = useLocation();
-  const from = location.state?.from?.pathname || '/';
 
   const handleInputChange = (event) => {
     const { name, value } = event.target;
-    if (name === 'phone') {
-      const digitsOnly = value.replace(/\D/g, '').slice(0, 10);
-      setFormData((prev) => ({ ...prev, [name]: digitsOnly }));
+    setFormData((prev) => {
+      const next = { ...prev, [name]: value };
 
-      if (!digitsOnly) {
-        setPhoneError('');
-      } else if (!VN_PHONE_REGEX.test(digitsOnly)) {
-        setPhoneError('So dien thoai khong hop le, vui long chi nhap ky tu so.');
-      } else {
-        setPhoneError('');
+      if (!isLogin && (name === 'password' || name === 'confirmPassword')) {
+        if (next.confirmPassword && next.password !== next.confirmPassword) {
+          setConfirmPasswordError(t('auth_password_mismatch'));
+        } else {
+          setConfirmPasswordError('');
+        }
       }
-      return;
-    }
 
-    setFormData((prev) => ({ ...prev, [name]: value }));
+      return next;
+    });
   };
 
   const toggleMode = () => {
     setIsLogin((prev) => !prev);
     setShowForgotPassword(false);
     setShowPassword(false);
-    setFormData({ username: '', email: '', password: '', name: '', phone: '' });
-    setPhoneError('');
+    setShowConfirmPassword(false);
+    setFormData(emptyForm);
+    setConfirmPasswordError('');
     setMessage(null);
   };
 
@@ -71,26 +69,29 @@ const Auth = () => {
     event.preventDefault();
     setMessage(null);
 
-    if (!isLogin && !VN_PHONE_REGEX.test(formData.phone)) {
-      setPhoneError('So dien thoai khong hop le, vui long chi nhap ky tu so.');
+    if (!isLogin && formData.password !== formData.confirmPassword) {
+      setConfirmPasswordError(t('auth_password_mismatch'));
       return;
     }
 
     try {
       if (isLogin) {
         await login(formData.username, formData.password);
-        navigate(from === '/auth' ? '/' : from, { replace: true });
+        navigate('/', { replace: true });
       } else {
         await register({
           username: formData.username,
           email: formData.email,
           password: formData.password,
           full_name: formData.name,
-          phone: formData.phone,
         });
 
         setMessage({ type: 'success', text: t('auth_register_success') });
         setIsLogin(true);
+        setShowPassword(false);
+        setShowConfirmPassword(false);
+        setFormData(emptyForm);
+        setConfirmPasswordError('');
       }
     } catch (error) {
       const errorMsg = safeText(error.detail || t('auth_error_default'));
@@ -106,14 +107,14 @@ const Auth = () => {
       const result = await requestPasswordReset(forgotEmail);
       setMessage({
         type: 'success',
-        text: safeText(result?.message, 'Neu email ton tai, lien ket dat lai mat khau da duoc gui.'),
+        text: safeText(result?.message, 'Nếu email tồn tại, liên kết đặt lại mật khẩu đã được gửi.'),
       });
       setForgotEmail('');
       setShowForgotPassword(false);
     } catch (error) {
       setMessage({
         type: 'error',
-        text: safeText(error?.detail, 'Khong the gui yeu cau. Vui long thu lai sau.'),
+        text: safeText(error?.detail, 'Không thể gửi yêu cầu. Vui lòng thử lại sau.'),
       });
     } finally {
       setForgotLoading(false);
@@ -127,24 +128,24 @@ const Auth = () => {
           <div className="max-w-xl space-y-6">
             <span className="inline-flex items-center gap-2 rounded-full bg-white/90 px-4 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-emerald-700 ring-1 ring-emerald-100">
               <Sparkles size={12} />
-              FreshFood AI access
+              Truy cập FreshFood AI
             </span>
 
             <div className="space-y-3">
               <p className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">
-                Trust-first account workspace
+                Khu vực tài khoản
               </p>
               <h1 className="text-4xl font-black leading-[1.04] tracking-[-0.03em] text-slate-950">
-                Scan, dat hang va quay lai kiem chung do tuoi trong cung mot he thong.
+                Theo dõi đơn và quay lại xác minh sau giao ở cùng một nơi.
               </h1>
               <p className="max-w-lg text-base leading-8 text-slate-600">
-                Tai khoan giu nguyen lich su don hang, dia chi giao, diem thuong va toan bo luong xac nhan sau giao.
+                Lưu đơn hàng, địa chỉ giao và điểm thưởng để dùng lại nhanh hơn.
               </p>
             </div>
 
             <div className="grid gap-3">
-              <BrandBullet icon={Leaf} text="Theo doi san pham tuoi song va danh gia bang anh that, khong chi dua vao mo ta." />
-              <BrandBullet icon={ShieldCheck} text="Pending order van co the sua va huy theo dung rule hien co cua he thong." />
+              <BrandBullet icon={Leaf} text="Theo dõi sản phẩm tươi và xem lại bằng ảnh thật." />
+              <BrandBullet icon={ShieldCheck} text="Đơn chờ xác nhận vẫn có thể sửa hoặc hủy." />
             </div>
           </div>
         </section>
@@ -152,7 +153,7 @@ const Auth = () => {
         <div className="auth-card">
           <div className="auth-header">
             <p className="mb-3 text-[11px] font-black uppercase tracking-[0.16em] text-emerald-700">
-              {isLogin ? 'Dang nhap' : 'Tao tai khoan'}
+              {isLogin ? 'Đăng nhập' : 'Tạo tài khoản'}
             </p>
             <h2>{isLogin ? t('auth_title_login') : t('auth_title_register')}</h2>
             <p>{isLogin ? t('auth_sub_login') : t('auth_sub_register')}</p>
@@ -175,7 +176,7 @@ const Auth = () => {
                 type="text"
                 name="username"
                 className="form-input"
-                placeholder="Vi du: van_a_123"
+                placeholder="Ví dụ: van_a_123"
                 value={formData.username}
                 onChange={handleInputChange}
                 required
@@ -190,39 +191,23 @@ const Auth = () => {
                     type="text"
                     name="name"
                     className="form-input"
-                    placeholder="Nguyen Van A"
+                    placeholder="Nguyễn Văn A"
                     value={formData.name}
                     onChange={handleInputChange}
                     required
                   />
                 </div>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="form-group">
-                    <label>{t('auth_email')}</label>
-                    <input
-                      type="email"
-                      name="email"
-                      className="form-input"
-                      placeholder="example@gmail.com"
-                      value={formData.email}
-                      onChange={handleInputChange}
-                      required
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>So dien thoai</label>
-                    <input
-                      type="tel"
-                      name="phone"
-                      className={`form-input ${phoneError ? 'border-rose-400 focus:border-rose-500 focus:shadow-[0_0_0_4px_rgba(244,63,94,0.15)]' : ''}`}
-                      placeholder="0900000000"
-                      pattern="^0[0-9]{9}$"
-                      value={formData.phone}
-                      onChange={handleInputChange}
-                      required
-                    />
-                    {phoneError && <p className="mt-2 text-xs font-semibold text-rose-600">{phoneError}</p>}
-                  </div>
+                <div className="form-group">
+                  <label>{t('auth_email')}</label>
+                  <input
+                    type="email"
+                    name="email"
+                    className="form-input"
+                    placeholder="example@gmail.com"
+                    value={formData.email}
+                    onChange={handleInputChange}
+                    required
+                  />
                 </div>
               </>
             )}
@@ -243,12 +228,40 @@ const Auth = () => {
                   type="button"
                   onClick={() => setShowPassword((prev) => !prev)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1.5 text-slate-500 transition hover:bg-slate-100"
-                  aria-label={showPassword ? 'An mat khau' : 'Hien mat khau'}
+                  aria-label={showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
                 >
                   {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
             </div>
+
+            {!isLogin && (
+              <div className="form-group">
+                <label>{t('auth_confirm_password')}</label>
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    name="confirmPassword"
+                    className={`form-input pe-12 ${confirmPasswordError ? 'border-rose-400 focus:border-rose-500 focus:shadow-[0_0_0_4px_rgba(244,63,94,0.15)]' : ''}`}
+                    placeholder="********"
+                    value={formData.confirmPassword}
+                    onChange={handleInputChange}
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword((prev) => !prev)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1.5 text-slate-500 transition hover:bg-slate-100"
+                    aria-label={showConfirmPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                  >
+                    {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+                {confirmPasswordError && (
+                  <p className="mt-2 text-xs font-semibold text-rose-600">{confirmPasswordError}</p>
+                )}
+              </div>
+            )}
 
             {isLogin && (
               <div className="mb-4 text-right">
@@ -257,7 +270,7 @@ const Auth = () => {
                   onClick={() => setShowForgotPassword((prev) => !prev)}
                   className="text-sm font-semibold text-emerald-700 hover:text-emerald-800"
                 >
-                  Quen mat khau?
+                  Quên mật khẩu?
                 </button>
               </div>
             )}
@@ -272,13 +285,13 @@ const Auth = () => {
               onSubmit={handleForgotPassword}
               className="mt-4 space-y-3 rounded-[22px] border border-slate-200 bg-slate-50/90 p-4"
             >
-              <p className="text-sm font-semibold text-slate-900">Quen mat khau</p>
+              <p className="text-sm font-semibold text-slate-900">Quên mật khẩu</p>
               <input
                 type="email"
                 value={forgotEmail}
                 onChange={(event) => setForgotEmail(event.target.value)}
                 className="form-input"
-                placeholder="Nhap email tai khoan"
+                placeholder="Nhập email tài khoản"
                 required
               />
               <button
@@ -286,7 +299,7 @@ const Auth = () => {
                 disabled={forgotLoading}
                 className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-70"
               >
-                {forgotLoading ? 'Dang gui...' : 'Gui yeu cau'}
+                {forgotLoading ? 'Đang gửi...' : 'Gửi yêu cầu'}
               </button>
             </form>
           )}

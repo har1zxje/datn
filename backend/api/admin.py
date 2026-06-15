@@ -4,8 +4,12 @@ import io
 import re
 import shutil
 import uuid
+import zipfile
 from pathlib import Path
 from typing import List, Optional
+
+from decimal import ROUND_HALF_UP
+from xml.sax.saxutils import escape
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -17,6 +21,7 @@ from sqlalchemy.orm import Session, joinedload
 import models
 import schemas
 from api.auth import get_current_user
+from api.orders import ensure_customer_can_order, ensure_freshness_confirmation_is_available, get_user_order_with_items
 from database import get_db
 from models import ComplaintResolutionStatus
 from utils.audit import log_audit
@@ -26,13 +31,16 @@ from utils.cache import (
     CACHE_KEY_ADMIN_STATS, CACHE_TTL_ADMIN_STATS,
     CACHE_KEY_CATEGORIES, CACHE_KEY_PRODUCTS_PREFIX,
 )
-from utils.freshness import ensure_delivered_notification
+from utils.freshness import ensure_delivered_notification, get_reported_order_item_ids
+from utils.file_validation import validate_image_upload_sync
 from utils.inventory import apply_stock_delta, set_product_quantity, derive_stock_status, record_stock_transaction
 
 router = APIRouter(tags=["Admin"])
 PRODUCT_UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads" / "products"
 PAYMENT_QR_UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads" / "payment_qr"
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+FEATURED_PRODUCT_LIMIT = 5
+PROMOTION_TYPES = {"none", "percent", "fixed", "badge"}
 
 STATUS_ALIASES = {
     "Cho xac nhan": models.OrderStatus.PENDING,
@@ -68,6 +76,10 @@ class AdminProductCreate(BaseModel):
     stock_status: Optional[str] = None
     rating: Optional[float] = Field(default=5.0, ge=0, le=5)
     low_stock_threshold: Optional[int] = Field(default=5, ge=0)
+    promotion_type: str = "none"
+    promotion_value: Decimal = Decimal("0")
+    promotion_label: Optional[str] = None
+    is_featured: bool = False
 
 
 class AdminProductUpdate(BaseModel):
@@ -84,6 +96,10 @@ class AdminProductUpdate(BaseModel):
     stock_status: Optional[str] = None
     rating: Optional[float] = Field(default=None, ge=0, le=5)
     low_stock_threshold: Optional[int] = Field(default=None, ge=0)
+    promotion_type: Optional[str] = None
+    promotion_value: Optional[Decimal] = None
+    promotion_label: Optional[str] = None
+    is_featured: Optional[bool] = None
 
 
 def get_current_admin_user(
@@ -92,7 +108,7 @@ def get_current_admin_user(
     if not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Ban khong co quyen truy cap tai nguyen Admin",
+            detail="Bạn không có quyền truy cập tài nguyên Admin",
         )
     return current_user
 
@@ -104,7 +120,7 @@ def get_current_staff_or_admin_user(
     if not (current_user.is_admin or current_user.is_staff):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Ban khong co quyen thuc hien thao tac nay",
+            detail="Bạn không có quyền thực hiện thao tác này",
         )
     return current_user
 
@@ -112,6 +128,70 @@ def get_current_staff_or_admin_user(
 def slugify(value: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.lower()).strip("-")
     return slug or "item"
+
+
+def enforce_featured_product_limit(
+    db: Session,
+    *,
+    is_featured: bool,
+    current_product_id: Optional[int] = None,
+):
+    if not is_featured:
+        return
+
+    query = db.query(func.count(models.Product.id)).filter(
+        models.Product.is_featured == True,
+        models.Product.is_active == True,
+    )
+    if current_product_id is not None:
+        query = query.filter(models.Product.id != current_product_id)
+
+    featured_count = int(query.scalar() or 0)
+    if featured_count >= FEATURED_PRODUCT_LIMIT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Chỉ được chọn tối đa {FEATURED_PRODUCT_LIMIT} sản phẩm nổi bật.",
+        )
+
+
+def resolve_promotion_fields(
+    *,
+    price: Decimal,
+    promotion_type: Optional[str],
+    promotion_value: Optional[Decimal],
+    promotion_label: Optional[str],
+):
+    normalized_type = (promotion_type or "none").strip().lower()
+    if normalized_type not in PROMOTION_TYPES:
+        raise HTTPException(status_code=422, detail="Loại khuyến mãi không hợp lệ")
+
+    normalized_label = (promotion_label or "").strip() or None
+    normalized_value = Decimal(promotion_value or 0)
+
+    if normalized_type == "none":
+        return "none", Decimal("0"), None, None
+
+    if normalized_type == "badge":
+        if not normalized_label:
+            raise HTTPException(status_code=422, detail="Vui lòng nhập nội dung badge")
+        return "badge", Decimal("0"), normalized_label, None
+
+    if normalized_value <= 0:
+        raise HTTPException(status_code=422, detail="Giá trị khuyến mãi phải lớn hơn 0")
+
+    if normalized_type == "percent":
+        if normalized_value > 100:
+            raise HTTPException(status_code=422, detail="Phần trăm khuyến mãi không được vượt quá 100")
+        discount_price = (
+            price * (Decimal("100") - normalized_value) / Decimal("100")
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    else:
+        discount_price = (price - normalized_value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    if discount_price < 0:
+        discount_price = Decimal("0")
+
+    return normalized_type, normalized_value, normalized_label, discount_price
 
 
 def normalize_order_status(value: str) -> models.OrderStatus:
@@ -123,7 +203,7 @@ def normalize_order_status(value: str) -> models.OrderStatus:
     valid = ", ".join(status.value for status in models.OrderStatus)
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail=f"Trang thai khong hop le. Hay chon mot trong: {valid}",
+        detail=f"Trạng thái không hợp lệ. Hãy chọn một trong: {valid}",
     )
 
 
@@ -167,6 +247,13 @@ def get_unread_feedback_filter():
     return or_(
         models.ScanFeedbackEvent.is_read == False,
         models.ScanFeedbackEvent.is_read.is_(None),
+    )
+
+
+def get_unread_verification_feedback_filter():
+    return or_(
+        models.VerificationReport.is_read == False,
+        models.VerificationReport.is_read.is_(None),
     )
 
 
@@ -217,6 +304,123 @@ def serialize_feedback_event(event: models.ScanFeedbackEvent):
     }
 
 
+def serialize_verification_feedback(report: models.VerificationReport):
+    confidence = float(report.prediction_confidence or 0)
+    if confidence <= 1:
+        confidence *= 100
+
+    if report.scan_correct is False:
+        summary = f"AI quét chưa khớp với tên sản phẩm đặt mua: {report.product_name}."
+    elif report.user_feedback is False:
+        summary = f"Người dùng báo đã nhận sai sản phẩm cho mục {report.product_name}."
+    else:
+        summary = f"Người dùng đã xác minh sản phẩm {report.product_name}."
+
+    if report.voucher_code:
+        summary = f"{summary} Voucher da tao: {report.voucher_code}."
+
+    return {
+        "id": -report.id,
+        "scan_id": None,
+        "user_id": report.user_id,
+        "source": "verification_report",
+        "image_url": report.image_base64,
+        "model_version": "tfjs-client",
+        "predicted_label": report.prediction_label or report.product_name,
+        "predicted_status": report.prediction_freshness or "Chưa rõ",
+        "predicted_confidence": confidence,
+        "is_correct": bool(report.scan_correct),
+        "corrected_label": report.product_name if report.scan_correct is False else None,
+        "corrected_status": "Người dùng xác nhận đúng sản phẩm" if report.user_feedback else "Người dùng báo sai sản phẩm",
+        "notes": summary,
+        "extra_metadata": {
+            "report_type": "verification_report",
+            "order_id": report.order_id,
+            "order_item_id": report.order_item_id,
+            "product_id": report.product_id,
+            "product_name": report.product_name,
+            "user_feedback": bool(report.user_feedback),
+            "points_awarded": int(report.points_awarded or 0),
+            "voucher_code": report.voucher_code,
+        },
+        "is_read": bool(report.is_read),
+        "read_at": report.read_at,
+        "created_at": report.created_at,
+        "user": serialize_user_brief(report.user),
+        "scan": None,
+    }
+
+
+def serialize_freshness_verification_report(review: models.FreshnessReview):
+    return {
+        "id": review.id,
+        "order_id": review.order_id,
+        "order_number": review.order.order_number if review.order else f"ORDER-{review.order_id}",
+        "order_item_id": review.order_item_id,
+        "product_id": review.product_id,
+        "product_name": review.product.name if review.product else f"Product #{review.product_id}",
+        "image_url": review.image_url,
+        "predicted_label": review.predicted_label,
+        "predicted_result": review.predicted_result,
+        "confidence": float(review.ai_confidence or 0),
+        "is_prediction_correct": review.is_prediction_correct,
+        "correct_label": review.correct_label,
+        "correct_result": review.correct_result,
+        "manual_note": review.manual_note,
+        "reward_points": int(review.reward_points or 0),
+        "voucher_id": review.voucher_id,
+        "voucher_code": review.voucher.code if review.voucher else None,
+        "created_at": review.created_at,
+        "user": serialize_user_brief(review.user),
+    }
+
+
+def feedback_matches_search(item: dict, search: str) -> bool:
+    keyword = (search or "").strip().lower()
+    if not keyword:
+        return True
+
+    haystack = [
+        item.get("predicted_label"),
+        item.get("predicted_status"),
+        item.get("corrected_label"),
+        item.get("corrected_status"),
+        item.get("notes"),
+        item.get("source"),
+        item.get("extra_metadata", {}).get("product_name") if isinstance(item.get("extra_metadata"), dict) else None,
+        item.get("user", {}).get("username") if isinstance(item.get("user"), dict) else None,
+        item.get("user", {}).get("full_name") if isinstance(item.get("user"), dict) else None,
+        item.get("user", {}).get("email") if isinstance(item.get("user"), dict) else None,
+    ]
+    return any(keyword in str(value or "").lower() for value in haystack)
+
+
+def feedback_matches_verdict(item: dict, verdict: str) -> bool:
+    normalized_verdict = (verdict or "all").strip().lower()
+    if normalized_verdict == "all":
+        return True
+    if normalized_verdict == "correct":
+        return bool(item.get("is_correct"))
+    if normalized_verdict == "disputed":
+        return not bool(item.get("is_correct"))
+    raise HTTPException(status_code=400, detail="verdict phai la all, correct hoac disputed")
+
+
+def combine_admin_feedback_items(
+    scan_feedback_rows: list[models.ScanFeedbackEvent],
+    verification_rows: list[models.VerificationReport],
+):
+    items = [serialize_feedback_event(item) for item in scan_feedback_rows]
+    items.extend(serialize_verification_feedback(item) for item in verification_rows)
+    items.sort(
+        key=lambda item: (
+            0 if not item.get("is_read") else 1,
+            -(item.get("created_at").timestamp() if item.get("created_at") else 0),
+        )
+    )
+    return items
+
+
 def serialize_payment_qr_setting(setting: models.PaymentQRCodeSetting):
     return {
         "id": setting.id,
@@ -229,11 +433,31 @@ def serialize_payment_qr_setting(setting: models.PaymentQRCodeSetting):
     }
 
 
+def get_latest_payment_qr_setting(db: Session):
+    return (
+        db.query(models.PaymentQRCodeSetting)
+        .options(joinedload(models.PaymentQRCodeSetting.updated_by))
+        .order_by(models.PaymentQRCodeSetting.updated_at.desc(), models.PaymentQRCodeSetting.id.desc())
+        .first()
+    )
+
+
 def build_page_meta(page: int, limit: int, total: int) -> tuple[int, int, bool]:
     total_pages = max(1, (total + limit - 1) // limit)
     safe_page = min(page, total_pages) if total else 1
     has_next = safe_page < total_pages
     return safe_page, total_pages, has_next
+
+
+def parse_optional_query_date(value: Optional[str], field_name: str) -> Optional[datetime.date]:
+    raw_value = (value or "").strip()
+    if not raw_value:
+        return None
+
+    try:
+        return datetime.date.fromisoformat(raw_value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"{field_name} phải theo định dạng YYYY-MM-DD") from exc
 
 
 def apply_admin_order_filters(
@@ -325,7 +549,7 @@ def require_openpyxl():
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Tinh nang Excel chua san sang tren server. Vui long cai dat openpyxl.",
+            detail="Tính năng Excel chưa sẵn sàng trên server. Vui lòng cài đặt openpyxl.",
         ) from exc
     return Workbook, load_workbook
 
@@ -351,7 +575,7 @@ def normalize_excel_transaction_type(value: object) -> str:
         "out": "export",
     }
     if normalized not in aliases:
-        raise ValueError("Loai giao dich phai la import hoac export")
+        raise ValueError("Loại giao dịch phải là import hoặc export")
     return aliases[normalized]
 
 
@@ -380,7 +604,114 @@ def parse_excel_transaction_date(value: object) -> Optional[datetime.datetime]:
         except ValueError:
             continue
 
-    raise ValueError("Ngay giao dich khong dung dinh dang hop le")
+
+def _xlsx_column_name(index: int) -> str:
+    result = ""
+    current = index
+    while current >= 0:
+        current, remainder = divmod(current, 26)
+        result = chr(65 + remainder) + result
+        current -= 1
+    return result
+
+
+def build_simple_xlsx(rows: list[list[object]], sheet_name: str = "sheet1") -> io.BytesIO:
+    workbook = io.BytesIO()
+
+    def cell_xml(value: object, row_number: int, col_number: int) -> str:
+        ref = f"{_xlsx_column_name(col_number)}{row_number}"
+        if value is None:
+            return f'<c r="{ref}"/>'
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return f'<c r="{ref}" t="n"><v>{value}</v></c>'
+        text_value = escape(str(value))
+        return f'<c r="{ref}" t="inlineStr"><is><t>{text_value}</t></is></c>'
+
+    sheet_rows = []
+    for row_index, row in enumerate(rows, start=1):
+        cells = "".join(cell_xml(value, row_index, col_index) for col_index, value in enumerate(row))
+        sheet_rows.append(f'<row r="{row_index}">{cells}</row>')
+
+    sheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f'<sheetData>{"".join(sheet_rows)}</sheetData>'
+        '</worksheet>'
+    )
+
+    with zipfile.ZipFile(workbook, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "[Content_Types].xml",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+            '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+            '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
+            '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>'
+            '</Types>',
+        )
+        archive.writestr(
+            "_rels/.rels",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+            '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>'
+            '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>'
+            '</Relationships>',
+        )
+        archive.writestr(
+            "docProps/core.xml",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" '
+            'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" '
+            'xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
+            '<dc:title>Freshness Verification Reports</dc:title>'
+            '</cp:coreProperties>',
+        )
+        archive.writestr(
+            "docProps/app.xml",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" '
+            'xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">'
+            '<Application>FreshFood AI</Application>'
+            '</Properties>',
+        )
+        archive.writestr(
+            "xl/workbook.xml",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            f'<sheets><sheet name="{escape(sheet_name)}" sheetId="1" r:id="rId1"/></sheets>'
+            '</workbook>',
+        )
+        archive.writestr(
+            "xl/_rels/workbook.xml.rels",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+            '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+            '</Relationships>',
+        )
+        archive.writestr(
+            "xl/styles.xml",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>'
+            '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>'
+            '<borders count="1"><border/></borders>'
+            '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+            '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>'
+            '</styleSheet>',
+        )
+        archive.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+
+    workbook.seek(0)
+    return workbook
+
+    raise ValueError("Ngày giao dịch không đúng định dạng hợp lệ")
 
 
 def build_excel_error_detail(prefix: str, errors: List[str]) -> str:
@@ -396,14 +727,12 @@ def ensure_upload_dir(upload_dir: Path):
 
 
 def save_uploaded_image(image_file: UploadFile, *, upload_dir: Path, relative_dir: str) -> str:
-    if not image_file.filename:
-        raise HTTPException(status_code=400, detail="Image file name is missing")
+    validate_image_upload_sync(
+        image_file,
+        allowed_extensions=ALLOWED_IMAGE_EXTENSIONS,
+    )
 
     extension = Path(image_file.filename).suffix.lower()
-    if extension not in ALLOWED_IMAGE_EXTENSIONS:
-        allowed = ", ".join(sorted(ALLOWED_IMAGE_EXTENSIONS))
-        raise HTTPException(status_code=400, detail=f"Unsupported file type. Allowed: {allowed}")
-
     ensure_upload_dir(upload_dir)
     file_name = f"{uuid.uuid4().hex}{extension}"
     output_path = upload_dir / file_name
@@ -433,6 +762,10 @@ async def parse_product_payload(request: Request):
             "stock_status": form_data.get("stock_status"),
             "rating": form_data.get("rating"),
             "low_stock_threshold": form_data.get("low_stock_threshold"),
+            "promotion_type": form_data.get("promotion_type"),
+            "promotion_value": form_data.get("promotion_value") or None,
+            "promotion_label": form_data.get("promotion_label") or None,
+            "is_featured": form_data.get("is_featured"),
         }
         image_file = form_data.get("image_file")
         if image_file and not isinstance(image_file, (UploadFile, StarletteUploadFile)):
@@ -457,7 +790,7 @@ def resolve_category_id(
     if category_id is not None:
         category = db.query(models.Category).filter(models.Category.id == category_id).first()
         if not category:
-            raise HTTPException(status_code=404, detail="Danh muc khong ton tai")
+            raise HTTPException(status_code=404, detail="Danh mục không tồn tại")
         return category.id
 
     category_value = (category_name or "Khac").strip()
@@ -509,12 +842,23 @@ async def add_product(
     quantity = product.quantity if product.quantity is not None else (product.stock or 0)
     stock_status = derive_stock_status(quantity)
     low_stock_threshold = product.low_stock_threshold if product.low_stock_threshold is not None else 5
+    promotion_type, promotion_value, promotion_label, discount_price = resolve_promotion_fields(
+        price=product.price,
+        promotion_type=product.promotion_type,
+        promotion_value=product.promotion_value,
+        promotion_label=product.promotion_label,
+    )
+    enforce_featured_product_limit(db, is_featured=bool(product.is_featured))
 
     new_product = models.Product(
         name=product.name.strip(),
         slug=slugify(product.name),
         description=product.description or "",
         price=product.price,
+        discount_price=discount_price,
+        promotion_type=promotion_type,
+        promotion_value=promotion_value,
+        promotion_label=promotion_label,
         category_id=category_id,
         image_url=image_url,
         quantity=quantity,
@@ -523,6 +867,7 @@ async def add_product(
         stock_status=stock_status,
         rating=product.rating or 5.0,
         is_active=True,
+        is_featured=bool(product.is_featured),
     )
 
     db.add(new_product)
@@ -534,7 +879,7 @@ async def add_product(
             user_id=current_user.id,
             transaction_type=models.TransactionType.IMPORT,
             quantity=quantity,
-            note=f"Ton kho ban dau khi tao san pham: {new_product.name}",
+            note=f"Tồn kho ban đầu khi tạo sản phẩm: {new_product.name}",
         )
     # [H3] Audit log
     log_audit(
@@ -550,7 +895,7 @@ async def add_product(
     cache_delete_pattern(CACHE_KEY_PRODUCTS_PREFIX + "*")
     cache_delete(CACHE_KEY_ADMIN_STATS)
     cache_delete(CACHE_KEY_CATEGORIES)
-    return {"message": "Them san pham thanh cong", "product": new_product}
+    return {"message": "Thêm sản phẩm thành công", "product": new_product}
 
 
 @router.put("/products/{product_id}")
@@ -562,7 +907,7 @@ async def update_product(
 ):
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if not product:
-        raise HTTPException(status_code=404, detail="Khong tim thay san pham")
+        raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm")
 
     payload, image_file = await parse_product_payload(request)
     update_data = AdminProductUpdate(**payload)
@@ -602,7 +947,7 @@ async def update_product(
             product=product,
             new_quantity=update_data.quantity,
             user_id=current_user.id,
-            note=f"Dieu chinh so luong khi cap nhat san pham #{product.id}",
+            note=f"Điều chỉnh số lượng khi cập nhật sản phẩm #{product.id}",
         )
     elif update_data.stock is not None:
         set_product_quantity(
@@ -610,11 +955,34 @@ async def update_product(
             product=product,
             new_quantity=update_data.stock,
             user_id=current_user.id,
-            note=f"Dieu chinh so luong khi cap nhat san pham #{product.id}",
+            note=f"Điều chỉnh số lượng khi cập nhật sản phẩm #{product.id}",
         )
 
     if update_data.low_stock_threshold is not None:
         product.low_stock_threshold = update_data.low_stock_threshold
+
+    next_promotion_type = update_data.promotion_type if update_data.promotion_type is not None else product.promotion_type
+    next_promotion_value = update_data.promotion_value if update_data.promotion_value is not None else product.promotion_value
+    next_promotion_label = update_data.promotion_label if update_data.promotion_label is not None else product.promotion_label
+    (
+        product.promotion_type,
+        product.promotion_value,
+        product.promotion_label,
+        product.discount_price,
+    ) = resolve_promotion_fields(
+        price=product.price,
+        promotion_type=next_promotion_type,
+        promotion_value=next_promotion_value,
+        promotion_label=next_promotion_label,
+    )
+
+    if update_data.is_featured is not None:
+        enforce_featured_product_limit(
+            db,
+            is_featured=bool(update_data.is_featured),
+            current_product_id=product_id,
+        )
+        product.is_featured = bool(update_data.is_featured)
 
     next_image_url = update_data.image_url or update_data.img
     if image_file:
@@ -641,7 +1009,7 @@ async def update_product(
     # [M5] Invalidate product and stats caches
     cache_delete_pattern(CACHE_KEY_PRODUCTS_PREFIX + "*")
     cache_delete(CACHE_KEY_ADMIN_STATS)
-    return {"message": "Cap nhat san pham thanh cong", "product": product}
+    return {"message": "Cập nhật sản phẩm thành công", "product": product}
 
 
 @router.delete("/products/{product_id}")
@@ -652,7 +1020,7 @@ def delete_product(
 ):
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if not product:
-        raise HTTPException(status_code=404, detail="Khong tim thay san pham")
+        raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm")
 
     product.is_active = False
     log_audit(  # [H3]
@@ -665,7 +1033,7 @@ def delete_product(
     # [M5] Invalidate product and stats caches
     cache_delete_pattern(CACHE_KEY_PRODUCTS_PREFIX + "*")
     cache_delete(CACHE_KEY_ADMIN_STATS)
-    return {"message": "Da an san pham khoi cua hang", "product_id": product_id}
+    return {"message": "Đã ẩn sản phẩm khỏi cửa hàng", "product_id": product_id}
 
 
 @router.get("/admin/users/paginated", response_model=schemas.AdminUserListResponse)
@@ -709,10 +1077,10 @@ def update_user_role(
 ):
     target_user = db.query(models.User).filter(models.User.id == user_id).first()
     if not target_user:
-        raise HTTPException(status_code=404, detail="Nguoi dung khong ton tai")
+        raise HTTPException(status_code=404, detail="Người dùng không tồn tại")
 
     if target_user.id == current_user.id and payload.role != "admin":
-        raise HTTPException(status_code=400, detail="Khong the tu huy quyen admin")
+        raise HTTPException(status_code=400, detail="Không thể tự hủy quyền admin")
 
     role_map = {
         "admin": models.UserRole.ADMIN,
@@ -778,6 +1146,44 @@ def get_stats(
         or 0
     )
 
+    last_7_dates = [now.date() - datetime.timedelta(days=offset) for offset in range(6, -1, -1)]
+    last_7_start = datetime.datetime.combine(last_7_dates[0], datetime.time.min)
+
+    revenue_rows = (
+        db.query(
+            func.date(models.Order.created_at).label("order_date"),
+            func.sum(models.Order.total).label("total_revenue"),
+        )
+        .filter(
+            models.Order.created_at >= last_7_start,
+            models.Order.created_at < end_today,
+            models.Order.status.in_(revenue_eligible_statuses),
+        )
+        .group_by(func.date(models.Order.created_at))
+        .all()
+    )
+    revenue_by_date = {
+        str(row.order_date): float(row.total_revenue or 0)
+        for row in revenue_rows
+    }
+
+    order_count_rows = (
+        db.query(
+            func.date(models.Order.created_at).label("order_date"),
+            func.count(models.Order.id).label("order_count"),
+        )
+        .filter(
+            models.Order.created_at >= last_7_start,
+            models.Order.created_at < end_today,
+        )
+        .group_by(func.date(models.Order.created_at))
+        .all()
+    )
+    order_count_by_date = {
+        str(row.order_date): int(row.order_count or 0)
+        for row in order_count_rows
+    }
+
     low_stock_query = (
         db.query(models.Product)
         .options(joinedload(models.Product.category))
@@ -802,11 +1208,26 @@ def get_stats(
         .limit(5)
         .all()
     )
+    recent_verification_rows = (
+        db.query(models.VerificationReport)
+        .options(joinedload(models.VerificationReport.user))
+        .order_by(
+            models.VerificationReport.is_read.asc(),
+            models.VerificationReport.created_at.desc(),
+        )
+        .limit(5)
+        .all()
+    )
     unread_feedback_count = (
         db.query(models.ScanFeedbackEvent)
         .filter(get_unread_feedback_filter())
         .count()
+        +
+        db.query(models.VerificationReport)
+        .filter(get_unread_verification_feedback_filter())
+        .count()
     )
+    combined_recent_feedback = combine_admin_feedback_items(recent_feedback_rows, recent_verification_rows)[:5]
 
     result = {
         "total_users": db.query(models.User).count(),
@@ -820,6 +1241,15 @@ def get_stats(
         "new_orders_today": today_order_count,
         "low_stock_products": low_stock_products,
         "unread_feedback_count": unread_feedback_count,
+        "last_7_days": [
+            {
+                "date": target_date.isoformat(),
+                "label": target_date.strftime("%d/%m"),
+                "revenue": revenue_by_date.get(target_date.isoformat(), 0.0),
+                "orders": order_count_by_date.get(target_date.isoformat(), 0),
+            }
+            for target_date in last_7_dates
+        ],
         "low_stock_items": [
             {
                 "id": item.id,
@@ -832,11 +1262,21 @@ def get_stats(
             }
             for item in low_stock_query.limit(6).all()
         ],
-        "recent_feedback": [serialize_feedback_event(item) for item in recent_feedback_rows],
+        "recent_feedback": combined_recent_feedback,
         "system_status": "on dinh",
     }
     cache_set(CACHE_KEY_ADMIN_STATS, result, ttl=CACHE_TTL_ADMIN_STATS)
     return result
+
+
+@router.get("/payment-qr", response_model=Optional[schemas.PaymentQRCodeResponse])
+def get_public_payment_qr_setting(
+    db: Session = Depends(get_db),
+):
+    setting = get_latest_payment_qr_setting(db)
+    if not setting:
+        return None
+    return serialize_payment_qr_setting(setting)
 
 
 @router.get("/admin/payment-qr", response_model=Optional[schemas.PaymentQRCodeResponse])
@@ -844,12 +1284,7 @@ def get_payment_qr_setting(
     current_user: models.User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
-    setting = (
-        db.query(models.PaymentQRCodeSetting)
-        .options(joinedload(models.PaymentQRCodeSetting.updated_by))
-        .order_by(models.PaymentQRCodeSetting.updated_at.desc(), models.PaymentQRCodeSetting.id.desc())
-        .first()
-    )
+    setting = get_latest_payment_qr_setting(db)
     if not setting:
         return None
     return serialize_payment_qr_setting(setting)
@@ -862,15 +1297,10 @@ async def upsert_payment_qr_setting(
     db: Session = Depends(get_db),
 ):
     form_data = await request.form()
-    provider_name = (form_data.get("provider_name") or "Chuyen khoan").strip() or "Chuyen khoan"
+    provider_name = (form_data.get("provider_name") or "Chuyển khoản").strip() or "Chuyển khoản"
     image_file = form_data.get("image_file")
 
-    setting = (
-        db.query(models.PaymentQRCodeSetting)
-        .options(joinedload(models.PaymentQRCodeSetting.updated_by))
-        .order_by(models.PaymentQRCodeSetting.updated_at.desc(), models.PaymentQRCodeSetting.id.desc())
-        .first()
-    )
+    setting = get_latest_payment_qr_setting(db)
 
     image_url = setting.image_url if setting else None
     if image_file and isinstance(image_file, (UploadFile, StarletteUploadFile)):
@@ -880,7 +1310,7 @@ async def upsert_payment_qr_setting(
             relative_dir="payment_qr",
         )
     elif image_url is None:
-        raise HTTPException(status_code=400, detail="Vui long tai len anh ma QR hop le")
+        raise HTTPException(status_code=400, detail="Vui lòng tải lên ảnh mã QR hợp lệ")
 
     if setting is None:
         setting = models.PaymentQRCodeSetting(
@@ -902,13 +1332,14 @@ async def upsert_payment_qr_setting(
 @router.get("/admin/feedback-events", response_model=schemas.AdminScanFeedbackListResponse)
 def get_admin_feedback_events(
     status: str = Query(default="all"),
+    verdict: str = Query(default="all"),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=12, ge=1, le=50),
     search: Optional[str] = Query(default=None),
     current_user: models.User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
-    base_query = (
+    scan_query = (
         db.query(models.ScanFeedbackEvent)
         .options(
             joinedload(models.ScanFeedbackEvent.user),
@@ -916,50 +1347,54 @@ def get_admin_feedback_events(
         )
         .outerjoin(models.User, models.ScanFeedbackEvent.user_id == models.User.id)
     )
+    verification_query = (
+        db.query(models.VerificationReport)
+        .options(joinedload(models.VerificationReport.user))
+        .outerjoin(models.User, models.VerificationReport.user_id == models.User.id)
+    )
+
+    global_items = combine_admin_feedback_items(
+        scan_query.all(),
+        verification_query.all(),
+    )
+    combined_items = global_items
 
     normalized_status = (status or "all").strip().lower()
     if normalized_status == "unread":
-        base_query = base_query.filter(get_unread_feedback_filter())
+        combined_items = [item for item in combined_items if not item.get("is_read")]
     elif normalized_status == "read":
-        base_query = base_query.filter(models.ScanFeedbackEvent.is_read == True)
+        combined_items = [item for item in combined_items if item.get("is_read")]
     elif normalized_status != "all":
         raise HTTPException(status_code=400, detail="status phai la all, unread hoac read")
 
+    filtered_items = [item for item in combined_items if feedback_matches_verdict(item, verdict)]
     if search:
-        keyword = f"%{search.strip().lower()}%"
-        base_query = base_query.filter(
-            or_(
-                func.lower(func.coalesce(models.ScanFeedbackEvent.predicted_label, "")).like(keyword),
-                func.lower(func.coalesce(models.ScanFeedbackEvent.corrected_label, "")).like(keyword),
-                func.lower(func.coalesce(models.ScanFeedbackEvent.notes, "")).like(keyword),
-                func.lower(func.coalesce(models.ScanFeedbackEvent.source, "")).like(keyword),
-                func.lower(func.coalesce(models.User.username, "")).like(keyword),
-                func.lower(func.coalesce(models.User.full_name, "")).like(keyword),
-                func.lower(func.coalesce(models.User.email, "")).like(keyword),
-            )
-        )
+        filtered_items = [item for item in filtered_items if feedback_matches_search(item, search)]
 
-    unread_count = (
-        db.query(models.ScanFeedbackEvent)
-        .filter(get_unread_feedback_filter())
-        .count()
-    )
-    total = base_query.count()
+    global_total = len(global_items)
+    global_unread_count = sum(1 for item in global_items if not item.get("is_read"))
+    global_read_count = global_total - global_unread_count
+    global_disputed_count = sum(1 for item in global_items if not item.get("is_correct"))
+
+    total = len(filtered_items)
+    unread_count = sum(1 for item in filtered_items if not item.get("is_read"))
+    read_count = total - unread_count
+    disputed_count = sum(1 for item in filtered_items if not item.get("is_correct"))
     safe_page, total_pages, has_next = build_page_meta(page, limit, total)
-    items = (
-        base_query.order_by(
-            models.ScanFeedbackEvent.is_read.asc(),
-            models.ScanFeedbackEvent.created_at.desc(),
-        )
-        .offset((safe_page - 1) * limit)
-        .limit(limit)
-        .all()
-    )
+    start = (safe_page - 1) * limit
+    end = start + limit
+    items = filtered_items[start:end]
 
     return {
-        "items": [serialize_feedback_event(item) for item in items],
+        "items": items,
         "total": total,
         "unread_count": unread_count,
+        "read_count": read_count,
+        "disputed_count": disputed_count,
+        "global_total": global_total,
+        "global_unread_count": global_unread_count,
+        "global_read_count": global_read_count,
+        "global_disputed_count": global_disputed_count,
         "page": safe_page,
         "limit": limit,
         "total_pages": total_pages,
@@ -973,6 +1408,25 @@ def mark_feedback_event_as_read(
     current_user: models.User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
+    if feedback_id < 0:
+        report = (
+            db.query(models.VerificationReport)
+            .options(joinedload(models.VerificationReport.user))
+            .filter(models.VerificationReport.id == abs(feedback_id))
+            .first()
+        )
+        if not report:
+            raise HTTPException(status_code=404, detail="Không tìm thấy AI feedback")
+
+        if not report.is_read:
+            report.is_read = True
+            report.read_at = datetime.datetime.utcnow()
+            db.commit()
+            db.refresh(report)
+            cache_delete(CACHE_KEY_ADMIN_STATS)
+
+        return serialize_verification_feedback(report)
+
     feedback_event = (
         db.query(models.ScanFeedbackEvent)
         .options(
@@ -983,15 +1437,163 @@ def mark_feedback_event_as_read(
         .first()
     )
     if not feedback_event:
-        raise HTTPException(status_code=404, detail="Khong tim thay AI feedback")
+        raise HTTPException(status_code=404, detail="Không tìm thấy AI feedback")
 
     if not feedback_event.is_read:
         feedback_event.is_read = True
         feedback_event.read_at = datetime.datetime.utcnow()
         db.commit()
         db.refresh(feedback_event)
+        cache_delete(CACHE_KEY_ADMIN_STATS)
 
     return serialize_feedback_event(feedback_event)
+
+
+@router.get(
+    "/admin/freshness-verification-reports",
+    response_model=schemas.AdminFreshnessVerificationReportListResponse,
+)
+def list_freshness_verification_reports(
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=12, ge=1, le=100),
+    date_from: Optional[str] = Query(default=None),
+    date_to: Optional[str] = Query(default=None),
+    prediction_correct: str = Query(default="all"),
+    correct_result: str = Query(default="all"),
+    has_voucher: str = Query(default="all"),
+    current_user: models.User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    parsed_date_from = parse_optional_query_date(date_from, "date_from")
+    parsed_date_to = parse_optional_query_date(date_to, "date_to")
+    if parsed_date_from and parsed_date_to and parsed_date_from > parsed_date_to:
+        raise HTTPException(status_code=400, detail="date_from không được lớn hơn date_to")
+
+    query = (
+        db.query(models.FreshnessReview)
+        .options(
+            joinedload(models.FreshnessReview.order),
+            joinedload(models.FreshnessReview.product),
+            joinedload(models.FreshnessReview.user),
+            joinedload(models.FreshnessReview.voucher),
+        )
+    )
+
+    if parsed_date_from:
+        query = query.filter(models.FreshnessReview.created_at >= datetime.datetime.combine(parsed_date_from, datetime.time.min))
+    if parsed_date_to:
+        query = query.filter(models.FreshnessReview.created_at < datetime.datetime.combine(parsed_date_to + datetime.timedelta(days=1), datetime.time.min))
+
+    normalized_prediction_correct = (prediction_correct or "all").strip().lower()
+    if normalized_prediction_correct == "correct":
+        query = query.filter(models.FreshnessReview.is_prediction_correct == True)
+    elif normalized_prediction_correct == "incorrect":
+        query = query.filter(models.FreshnessReview.is_prediction_correct == False)
+
+    normalized_result = (correct_result or "all").strip().lower()
+    if normalized_result in {"fresh", "spoiled"}:
+        query = query.filter(models.FreshnessReview.correct_result == normalized_result)
+
+    normalized_has_voucher = (has_voucher or "all").strip().lower()
+    if normalized_has_voucher == "yes":
+        query = query.filter(models.FreshnessReview.voucher_id.isnot(None))
+    elif normalized_has_voucher == "no":
+        query = query.filter(models.FreshnessReview.voucher_id.is_(None))
+
+    total = query.count()
+    safe_page, total_pages, has_next = build_page_meta(page, limit, total)
+    items = (
+        query.order_by(models.FreshnessReview.created_at.desc(), models.FreshnessReview.id.desc())
+        .offset((safe_page - 1) * limit)
+        .limit(limit)
+        .all()
+    )
+
+    return {
+        "items": [serialize_freshness_verification_report(item) for item in items],
+        "total": total,
+        "page": safe_page,
+        "limit": limit,
+        "total_pages": total_pages,
+        "has_next": has_next,
+    }
+
+
+@router.get("/admin/freshness-verification-reports/export-excel")
+def export_freshness_verification_reports_excel(
+    date_from: Optional[str] = Query(default=None),
+    date_to: Optional[str] = Query(default=None),
+    prediction_correct: str = Query(default="all"),
+    correct_result: str = Query(default="all"),
+    has_voucher: str = Query(default="all"),
+    current_user: models.User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    rows = list_freshness_verification_reports(
+        page=1,
+        limit=100000,
+        date_from=date_from,
+        date_to=date_to,
+        prediction_correct=prediction_correct,
+        correct_result=correct_result,
+        has_voucher=has_voucher,
+        current_user=current_user,
+        db=db,
+    )["items"]
+    workbook_rows = [[
+        "order_id",
+        "order_number",
+        "order_item_id",
+        "product_id",
+        "product_name",
+        "image_url",
+        "predicted_label",
+        "predicted_result",
+        "confidence",
+        "is_prediction_correct",
+        "correct_label",
+        "correct_result",
+        "manual_note",
+        "reward_points",
+        "voucher_id",
+        "voucher_code",
+        "created_at",
+        "user_name",
+        "user_email",
+    ]]
+
+    for item in rows:
+        user = item.get("user") or {}
+        workbook_rows.append([
+            item["order_id"],
+            item["order_number"],
+            item["order_item_id"],
+            item["product_id"],
+            item["product_name"],
+            item["image_url"],
+            item["predicted_label"],
+            item["predicted_result"],
+            item["confidence"],
+            item["is_prediction_correct"],
+            item["correct_label"],
+            item["correct_result"],
+            item.get("manual_note"),
+            item["reward_points"],
+            item["voucher_id"],
+            item["voucher_code"],
+            item["created_at"].isoformat(sep=" ") if item["created_at"] else "",
+            user.get("full_name") or user.get("username") or "",
+            user.get("email") or "",
+        ])
+
+    buffer = build_simple_xlsx(workbook_rows, sheet_name="freshness_reports")
+
+    filename = f"freshness-verification-reports-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.xlsx"
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.delete("/admin/users/{user_id}")
@@ -1002,9 +1604,9 @@ def delete_user(
 ):
     db_user = db.query(models.User).filter(models.User.id == user_id).first()
     if not db_user:
-        raise HTTPException(status_code=404, detail="Nguoi dung khong ton tai")
+        raise HTTPException(status_code=404, detail="Người dùng không tồn tại")
     if db_user.is_admin:
-        raise HTTPException(status_code=400, detail="Khong the xoa tai khoan admin")
+        raise HTTPException(status_code=400, detail="Không thể xóa tài khoản admin")
 
     log_audit(  # [H3]
         db, user_id=current_user.id,
@@ -1030,7 +1632,7 @@ def get_paginated_admin_orders(
     db: Session = Depends(get_db),
 ):
     if date_from and date_to and date_from > date_to:
-        raise HTTPException(status_code=400, detail="date_from khong duoc lon hon date_to")
+        raise HTTPException(status_code=400, detail="date_from không được lớn hơn date_to")
 
     filtered_query = apply_admin_order_filters(
         build_admin_orders_query(db),
@@ -1089,7 +1691,7 @@ def get_order_detail(
         .first()
     )
     if not order:
-        raise HTTPException(status_code=404, detail="Don hang khong ton tai")
+        raise HTTPException(status_code=404, detail="Đơn hàng không tồn tại")
     return order
 
 
@@ -1102,7 +1704,7 @@ def update_order_status(
 ):
     order = db.query(models.Order).filter(models.Order.id == order_id).first()
     if not order:
-        raise HTTPException(status_code=404, detail="Don hang khong ton tai")
+        raise HTTPException(status_code=404, detail="Đơn hàng không tồn tại")
 
     new_status = normalize_order_status(status_data.new_status)
     old_status = order.status.value if hasattr(order.status, "value") else str(order.status)
@@ -1116,7 +1718,7 @@ def update_order_status(
     )
     db.commit()
     db.refresh(order)
-    return {"message": "Cap nhat trang thai thanh cong", "order": order}
+    return {"message": "Cập nhật trạng thái thành công", "order": order}
 
 
 @router.put("/admin/orders/bulk-status")
@@ -1127,7 +1729,7 @@ def bulk_update_order_status(
 ):
     unique_order_ids = list(dict.fromkeys(payload.order_ids))
     if not unique_order_ids:
-        raise HTTPException(status_code=400, detail="Danh sach don hang khong duoc de trong")
+        raise HTTPException(status_code=400, detail="Danh sách đơn hàng không được để trống")
 
     new_status = normalize_order_status(payload.new_status)
     orders = (
@@ -1137,7 +1739,7 @@ def bulk_update_order_status(
         .all()
     )
     if not orders:
-        raise HTTPException(status_code=404, detail="Khong tim thay don hang nao de cap nhat")
+        raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng nào để cập nhật")
 
     found_ids = {order.id for order in orders}
     missing_ids = [order_id for order_id in unique_order_ids if order_id not in found_ids]
@@ -1149,7 +1751,7 @@ def bulk_update_order_status(
     db.commit()
 
     return {
-        "message": "Cap nhat trang thai hang loat thanh cong",
+        "message": "Cập nhật trạng thái hàng loạt thành công",
         "updated_count": len(orders),
         "updated_order_ids": [order.id for order in orders],
         "missing_order_ids": missing_ids,
@@ -1165,11 +1767,11 @@ def delete_order(
 ):
     order = db.query(models.Order).filter(models.Order.id == order_id).first()
     if not order:
-        raise HTTPException(status_code=404, detail="Don hang khong ton tai")
+        raise HTTPException(status_code=404, detail="Đơn hàng không tồn tại")
 
     db.delete(order)
     db.commit()
-    return {"message": f"Da xoa don hang ID {order_id}"}
+    return {"message": f"Đã xóa đơn hàng ID {order_id}"}
 
 
 @router.get("/users/{user_id}/orders", response_model=List[schemas.Order])
@@ -1179,7 +1781,7 @@ def get_user_orders(
     db: Session = Depends(get_db),
 ):
     if current_user.id != user_id and not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Khong co quyen xem don hang nay")
+        raise HTTPException(status_code=403, detail="Không có quyền xem đơn hàng này")
     return db.query(models.Order).filter(models.Order.user_id == user_id).all()
 
 
@@ -1352,15 +1954,15 @@ def add_stock_transaction(
 ):
     product = db.query(models.Product).filter(models.Product.id == data.product_id).first()
     if not product:
-        raise HTTPException(status_code=404, detail="Khong tim thay san pham")
+        raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm")
 
     if data.type not in ("import", "export"):
-        raise HTTPException(status_code=400, detail="Loai giao dich khong hop le (import/export)")
+        raise HTTPException(status_code=400, detail="Loại giao dịch không hợp lệ (import/export)")
 
     if data.type == "export" and (product.quantity or 0) < data.quantity:
         raise HTTPException(
             status_code=400,
-            detail=f"So luong xuat ({data.quantity}) vuot qua ton kho hien tai ({product.quantity or 0})",
+            detail=f"Số lượng xuất ({data.quantity}) vượt quá tồn kho hiện tại ({product.quantity or 0})",
         )
 
     transaction = apply_stock_delta(
@@ -1385,7 +1987,7 @@ async def import_stock_transactions_excel(
     db: Session = Depends(get_db),
 ):
     if not excel_file.filename or not excel_file.filename.lower().endswith(".xlsx"):
-        raise HTTPException(status_code=400, detail="Chi chap nhan file Excel .xlsx")
+        raise HTTPException(status_code=400, detail="Chỉ chấp nhận file Excel .xlsx")
 
     _, load_workbook = require_openpyxl()
 
@@ -1396,11 +1998,11 @@ async def import_stock_transactions_excel(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=400, detail="Khong the doc file Excel. Vui long kiem tra lai dinh dang.") from exc
+        raise HTTPException(status_code=400, detail="Không thể đọc file Excel. Vui lòng kiểm tra lại định dạng.") from exc
 
     rows = list(worksheet.iter_rows(values_only=True))
     if not rows:
-        raise HTTPException(status_code=400, detail="File Excel khong co du lieu.")
+        raise HTTPException(status_code=400, detail="File Excel không có dữ liệu.")
 
     header_aliases = {
         "product_id": "product_id",
@@ -1429,7 +2031,7 @@ async def import_stock_transactions_excel(
     if missing_headers:
         raise HTTPException(
             status_code=400,
-            detail=f"File Excel thieu cot bat buoc: {', '.join(missing_headers)}",
+            detail=f"File Excel thiếu cột bắt buộc: {', '.join(missing_headers)}",
         )
 
     operations = []
@@ -1448,7 +2050,7 @@ async def import_stock_transactions_excel(
             product_id = int(product_id_raw)
             quantity = int(quantity_raw)
             if quantity < 1:
-                raise ValueError("So luong phai lon hon 0")
+                raise ValueError("Số lượng phải lớn hơn 0")
 
             operations.append(
                 {
@@ -1461,16 +2063,16 @@ async def import_stock_transactions_excel(
                 }
             )
         except ValueError as exc:
-            parse_errors.append(f"Dong {row_number}: {exc}")
+            parse_errors.append(f"Dòng {row_number}: {exc}")
 
     if parse_errors:
         raise HTTPException(
             status_code=400,
-            detail=build_excel_error_detail("File Excel co du lieu khong hop le:", parse_errors),
+            detail=build_excel_error_detail("File Excel có dữ liệu không hợp lệ:", parse_errors),
         )
 
     if not operations:
-        raise HTTPException(status_code=400, detail="File Excel khong co dong giao dich hop le nao.")
+        raise HTTPException(status_code=400, detail="File Excel không có dòng giao dịch hợp lệ nào.")
 
     product_ids = sorted({item["product_id"] for item in operations})
     products = (
@@ -1484,7 +2086,7 @@ async def import_stock_transactions_excel(
     if missing_products:
         raise HTTPException(
             status_code=400,
-            detail=f"Khong tim thay san pham voi ID: {', '.join(str(item) for item in missing_products[:12])}",
+            detail=f"Không tìm thấy sản phẩm với ID: {', '.join(str(item) for item in missing_products[:12])}",
         )
 
     validation_errors: List[str] = []
@@ -1495,7 +2097,7 @@ async def import_stock_transactions_excel(
         next_quantity = current_quantity + delta
         if next_quantity < 0:
             validation_errors.append(
-                f"Dong {item['row_number']}: xuat {item['quantity']} vuot ton kho hien tai ({current_quantity}) cua san pham #{item['product_id']}"
+                f"Dòng {item['row_number']}: xuất {item['quantity']} vượt tồn kho hiện tại ({current_quantity}) của sản phẩm #{item['product_id']}"
             )
             continue
         stock_projection[item["product_id"]] = next_quantity
@@ -1503,7 +2105,7 @@ async def import_stock_transactions_excel(
     if validation_errors:
         raise HTTPException(
             status_code=400,
-            detail=build_excel_error_detail("Khong the nhap file Excel vi ton kho khong hop le:", validation_errors),
+            detail=build_excel_error_detail("Không thể nhập file Excel vì tồn kho không hợp lệ:", validation_errors),
         )
 
     imported_count = 0
@@ -1516,7 +2118,7 @@ async def import_stock_transactions_excel(
                 product=product,
                 delta=delta,
                 user_id=current_user.id,
-                note=item["note"] or f"Import Excel dong {item['row_number']}",
+                note=item["note"] or f"Import Excel dòng {item['row_number']}",
                 transaction_date=item["transaction_date"],
             )
             imported_count += 1
@@ -1527,12 +2129,12 @@ async def import_stock_transactions_excel(
         raise
     except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=500, detail="Khong the nhap giao dich tu file Excel.") from exc
+        raise HTTPException(status_code=500, detail="Không thể nhập giao dịch từ file Excel.") from exc
 
     return {
         "imported_count": imported_count,
         "product_count": len(product_ids),
-        "message": "Nhap file Excel thanh cong",
+        "message": "Nhập file Excel thành công",
     }
 
 
@@ -1574,20 +2176,20 @@ def approve_freshness_complaint(
         models.FreshnessComplaint.id == complaint_id
     ).first()
     if not complaint:
-        raise HTTPException(status_code=404, detail="Khong tim thay khieu nai")
+        raise HTTPException(status_code=404, detail="Không tìm thấy khiếu nại")
     if complaint.resolution_status != ComplaintResolutionStatus.PENDING_REVIEW:
-        raise HTTPException(status_code=400, detail=f"Khieu nai khong o trang thai cho duyet (hien tai: {complaint.resolution_status})")
+        raise HTTPException(status_code=400, detail=f"Khiếu nại không ở trạng thái chờ duyệt (hiện tại: {complaint.resolution_status})")
 
     user = db.query(models.User).filter(models.User.id == complaint.user_id).first()
     if not user:
-        raise HTTPException(status_code=404, detail="Nguoi dung khong ton tai")
+        raise HTTPException(status_code=404, detail="Người dùng không tồn tại")
 
     if complaint.complaint_type == "refund" and complaint.refund_amount:
         user.voucher_balance = Decimal(user.voucher_balance or 0) + complaint.refund_amount
 
     complaint.resolution_status = ComplaintResolutionStatus.APPROVED
     db.commit()
-    return {"success": True, "message": "Da phe duyet va cong voucher thanh cong", "complaint_id": complaint_id}
+    return {"success": True, "message": "Đã phê duyệt và cộng voucher thành công", "complaint_id": complaint_id}
 
 
 @router.put("/admin/freshness-complaints/{complaint_id}/reject")
@@ -1601,10 +2203,62 @@ def reject_freshness_complaint(
         models.FreshnessComplaint.id == complaint_id
     ).first()
     if not complaint:
-        raise HTTPException(status_code=404, detail="Khong tim thay khieu nai")
+        raise HTTPException(status_code=404, detail="Không tìm thấy khiếu nại")
     if complaint.resolution_status != ComplaintResolutionStatus.PENDING_REVIEW:
-        raise HTTPException(status_code=400, detail="Khieu nai khong o trang thai cho duyet")
+        raise HTTPException(status_code=400, detail="Khiếu nại không ở trạng thái chờ duyệt")
 
     complaint.resolution_status = ComplaintResolutionStatus.REJECTED
     db.commit()
-    return {"success": True, "message": "Da tu choi khieu nai", "complaint_id": complaint_id}
+    return {"success": True, "message": "Đã từ chối khiếu nại", "complaint_id": complaint_id}
+
+
+@router.post("/admin/verification-report", response_model=schemas.VerificationReportResponse)
+def create_verification_report(
+    payload: schemas.VerificationReportCreate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ensure_customer_can_order(current_user)
+
+    try:
+        order_id = int(payload.orderId)
+        product_id = int(payload.productId)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="orderId hoặc productId không hợp lệ") from exc
+
+    order = get_user_order_with_items(db, order_id, current_user.id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng")
+
+    ensure_freshness_confirmation_is_available(db, order, current_user.id)
+
+    reported_item_ids = get_reported_order_item_ids(db, order.id, current_user.id)
+    matching_items = [item for item in order.items if item.product_id == product_id]
+    if not matching_items:
+        raise HTTPException(status_code=400, detail="Sản phẩm không thuộc đơn hàng này")
+
+    pending_item = next((item for item in matching_items if item.id not in reported_item_ids), None)
+    if not pending_item:
+        raise HTTPException(status_code=409, detail="Sản phẩm này đã được gửi xác minh trước đó")
+
+    report = models.VerificationReport(
+        order_id=order.id,
+        order_item_id=pending_item.id,
+        user_id=current_user.id,
+        product_id=product_id,
+        product_name=payload.productName,
+        image_base64=payload.imageBase64,
+        prediction_label=payload.prediction.label if payload.prediction else None,
+        prediction_freshness=payload.prediction.freshness if payload.prediction else None,
+        prediction_confidence=payload.prediction.confidence if payload.prediction else None,
+        scan_correct=payload.scanCorrect,
+        user_feedback=payload.userFeedback,
+        points_awarded=payload.pointsAwarded,
+        is_read=False,
+        created_at=payload.timestamp,
+    )
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+    cache_delete(CACHE_KEY_ADMIN_STATS)
+    return report

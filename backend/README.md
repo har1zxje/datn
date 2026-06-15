@@ -47,6 +47,8 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+Use `python -m ...` for project commands after activation. That avoids picking up a global `uvicorn` executable from a different Python installation.
+
 ### 3️⃣ Setup Environment
 
 ```bash
@@ -61,10 +63,10 @@ cp .env.example .env
 
 ```bash
 # Development (auto-reload)
-uvicorn main:app --reload --port 8001
+python -m uvicorn main:app --reload --port 8001
 
 # Production
-uvicorn main:app --host 0.0.0.0 --port 8001
+python -m uvicorn main:app --host 0.0.0.0 --port 8001
 ```
 
 Server running at: **http://localhost:8001**
@@ -333,6 +335,17 @@ Fix:
 1. Use refresh_token to get new access_token
 2. POST /api/auth/refresh with your refresh_token
 ```
+
+### `ModuleNotFoundError` for `slowapi` or other backend packages
+
+```text
+ModuleNotFoundError: No module named 'slowapi'
+```
+
+Fix:
+1. Activate the backend virtualenv: `venv\Scripts\activate`
+2. Reinstall dependencies: `python -m pip install -r requirements.txt`
+3. Start the server with the same interpreter: `python -m uvicorn main:app --reload --port 8001`
 
 ---
 

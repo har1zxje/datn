@@ -16,7 +16,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.exc import OperationalError
 
 import models
-from api import admin, auth, delivery_profiles, notifications, orders, products, scans
+from api import admin, auth, delivery_profiles, notifications, orders, products, rewards, scans
 from database import SessionLocal, engine
 from observability import setup_observability
 from utils.ai_support import infer_ai_class_name
@@ -221,6 +221,9 @@ def ensure_product_compatibility_columns():
         "slug": "ALTER TABLE products ADD COLUMN slug VARCHAR(200)",
         "category_id": "ALTER TABLE products ADD COLUMN category_id INTEGER",
         "discount_price": "ALTER TABLE products ADD COLUMN discount_price DECIMAL(10, 2)",
+        "promotion_type": "ALTER TABLE products ADD COLUMN promotion_type VARCHAR(20) DEFAULT 'none'",
+        "promotion_value": "ALTER TABLE products ADD COLUMN promotion_value DECIMAL(10, 2) DEFAULT 0",
+        "promotion_label": "ALTER TABLE products ADD COLUMN promotion_label VARCHAR(120)",
         "quantity": "ALTER TABLE products ADD COLUMN quantity INTEGER DEFAULT 0",
         "low_stock_threshold": "ALTER TABLE products ADD COLUMN low_stock_threshold INTEGER DEFAULT 5",
         "unit": "ALTER TABLE products ADD COLUMN unit VARCHAR(30) DEFAULT 'kg'",
@@ -256,6 +259,10 @@ def ensure_product_compatibility_columns():
         updates.append("UPDATE products SET quantity = 0 WHERE quantity IS NULL")
     if "low_stock_threshold" in product_cols:
         updates.append("UPDATE products SET low_stock_threshold = 5 WHERE low_stock_threshold IS NULL")
+    if "promotion_type" in product_cols:
+        updates.append("UPDATE products SET promotion_type = 'none' WHERE promotion_type IS NULL OR TRIM(promotion_type) = ''")
+    if "promotion_value" in product_cols:
+        updates.append("UPDATE products SET promotion_value = 0 WHERE promotion_value IS NULL")
     if "unit" in product_cols:
         updates.append("UPDATE products SET unit = 'kg' WHERE unit IS NULL OR TRIM(unit) = ''")
     if "review_count" in product_cols:
@@ -511,6 +518,9 @@ def migrate_legacy_products_table():
                     category_id INTEGER NOT NULL,
                     price DECIMAL(10, 2) NOT NULL,
                     discount_price DECIMAL(10, 2),
+                    promotion_type VARCHAR(20) DEFAULT 'none',
+                    promotion_value DECIMAL(10, 2) DEFAULT 0,
+                    promotion_label VARCHAR(120),
                     quantity INTEGER DEFAULT 0,
                     low_stock_threshold INTEGER DEFAULT 5,
                     unit VARCHAR(30) DEFAULT 'kg',
@@ -544,11 +554,13 @@ def migrate_legacy_products_table():
                     """
                     INSERT INTO products_new (
                         id, name, slug, description, category_id, price, discount_price,
+                        promotion_type, promotion_value, promotion_label,
                         quantity, low_stock_threshold, unit, stock_status, sku, image_url,
                         images, rating, review_count, origin, harvest_date, expiry_date,
                         is_active, is_featured, ai_supported, ai_class_name, created_at, updated_at
                     ) VALUES (
                         :id, :name, :slug, :description, :category_id, :price, NULL,
+                        'none', 0, NULL,
                         :quantity, :low_stock_threshold, :unit, :stock_status, NULL, :image_url,
                         NULL, :rating, :review_count, NULL, NULL, NULL,
                         :is_active, :is_featured, 0, NULL, :created_at, :updated_at
@@ -557,7 +569,7 @@ def migrate_legacy_products_table():
                 ),
                 {
                     "id": row.get("id"),
-                    "name": row.get("name") or "San pham",
+                    "name": row.get("name") or "Sản phẩm",
                     "slug": f"{slugify(str(row.get('name') or 'product'))}-{row.get('id')}",
                     "description": row.get("description") or "",
                     "category_id": category_id or category_by_name["khac"]["id"],
@@ -654,6 +666,20 @@ def ensure_freshness_review_manual_columns():
         statements.append("ALTER TABLE freshness_reviews ADD COLUMN manual_rating VARCHAR(20)")
     if "manual_note" not in review_cols:
         statements.append("ALTER TABLE freshness_reviews ADD COLUMN manual_note TEXT")
+    if "predicted_label" not in review_cols:
+        statements.append("ALTER TABLE freshness_reviews ADD COLUMN predicted_label VARCHAR(120)")
+    if "predicted_result" not in review_cols:
+        statements.append("ALTER TABLE freshness_reviews ADD COLUMN predicted_result VARCHAR(40)")
+    if "is_prediction_correct" not in review_cols:
+        statements.append("ALTER TABLE freshness_reviews ADD COLUMN is_prediction_correct BOOLEAN")
+    if "correct_label" not in review_cols:
+        statements.append("ALTER TABLE freshness_reviews ADD COLUMN correct_label VARCHAR(120)")
+    if "correct_result" not in review_cols:
+        statements.append("ALTER TABLE freshness_reviews ADD COLUMN correct_result VARCHAR(40)")
+    if "reward_points" not in review_cols:
+        statements.append("ALTER TABLE freshness_reviews ADD COLUMN reward_points INTEGER DEFAULT 0")
+    if "voucher_id" not in review_cols:
+        statements.append("ALTER TABLE freshness_reviews ADD COLUMN voucher_id INTEGER")
 
     execute_statements(statements)
 
@@ -666,6 +692,10 @@ def ensure_order_experience_columns():
         statements.append("ALTER TABLE orders ADD COLUMN order_type VARCHAR(30) DEFAULT 'normal'")
     if "replacement_parent_order_id" not in order_cols:
         statements.append("ALTER TABLE orders ADD COLUMN replacement_parent_order_id INTEGER")
+    if "voucher_code" not in order_cols:
+        statements.append("ALTER TABLE orders ADD COLUMN voucher_code VARCHAR(60)")
+    if "points_redeemed" not in order_cols:
+        statements.append("ALTER TABLE orders ADD COLUMN points_redeemed INTEGER DEFAULT 0")
 
     execute_statements(statements)
 
@@ -673,6 +703,55 @@ def ensure_order_experience_columns():
     updates = []
     if "order_type" in order_cols:
         updates.append("UPDATE orders SET order_type = 'normal' WHERE order_type IS NULL OR TRIM(order_type) = ''")
+    if "points_redeemed" in order_cols:
+        updates.append("UPDATE orders SET points_redeemed = 0 WHERE points_redeemed IS NULL")
+    execute_statements(updates)
+
+
+def ensure_reward_columns():
+    voucher_cols = get_table_columns("generated_vouchers")
+    statements = []
+
+    if voucher_cols and "title" not in voucher_cols:
+        statements.append("ALTER TABLE generated_vouchers ADD COLUMN title VARCHAR(120) DEFAULT 'Voucher tri ân'")
+
+    execute_statements(statements)
+
+    voucher_cols = get_table_columns("generated_vouchers")
+    updates = []
+    if "title" in voucher_cols:
+        updates.append("UPDATE generated_vouchers SET title = 'Voucher tri ân' WHERE title IS NULL OR TRIM(title) = ''")
+    execute_statements(updates)
+
+
+def ensure_reward_source_order_column():
+    voucher_cols = get_table_columns("generated_vouchers")
+    if not voucher_cols or "source_order_id" in voucher_cols:
+        return
+    execute_statements(["ALTER TABLE generated_vouchers ADD COLUMN source_order_id INTEGER"])
+
+
+def ensure_verification_report_columns():
+    report_cols = get_table_columns("verification_reports")
+    statements = []
+    is_postgres = str(engine.url).startswith("postgresql")
+    ts_type = "TIMESTAMP" if is_postgres else "DATETIME"
+    bool_false = "FALSE" if is_postgres else "0"
+
+    if report_cols and "is_read" not in report_cols:
+        statements.append(f"ALTER TABLE verification_reports ADD COLUMN is_read BOOLEAN DEFAULT {bool_false}")
+    if report_cols and "read_at" not in report_cols:
+        statements.append(f"ALTER TABLE verification_reports ADD COLUMN read_at {ts_type}")
+
+    execute_statements(statements)
+
+    if is_postgres:
+        return
+
+    report_cols = get_table_columns("verification_reports")
+    updates = []
+    if "is_read" in report_cols:
+        updates.append("UPDATE verification_reports SET is_read = 0 WHERE is_read IS NULL")
     execute_statements(updates)
 
 
@@ -685,6 +764,9 @@ ensure_stock_transaction_columns()
 ensure_scan_feedback_columns()
 ensure_freshness_review_manual_columns()
 ensure_order_experience_columns()
+ensure_reward_columns()
+ensure_reward_source_order_column()
+ensure_verification_report_columns()
 
 _is_production = os.getenv("ENVIRONMENT", "development").lower() == "production"
 
@@ -764,6 +846,7 @@ app.include_router(products.router, prefix="/api")
 app.include_router(orders.router, prefix="/api")
 app.include_router(delivery_profiles.router, prefix="/api")
 app.include_router(scans.router, prefix="/api")
+app.include_router(rewards.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 app.include_router(notifications.router, prefix="/api")
 

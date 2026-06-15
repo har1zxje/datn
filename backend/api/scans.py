@@ -308,16 +308,16 @@ def _parse_tfjs_predictions(raw_value: Optional[str]) -> list[float]:
     try:
         parsed = json.loads(raw_value)
     except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=400, detail="tfjs_predictions_json khong hop le") from exc
+        raise HTTPException(status_code=400, detail="tfjs_predictions_json không hợp lệ") from exc
 
     if not isinstance(parsed, list):
-        raise HTTPException(status_code=400, detail="tfjs_predictions_json phai la mang so")
+        raise HTTPException(status_code=400, detail="tfjs_predictions_json phải là mảng số")
 
     predictions: list[float] = []
     for value in parsed:
         numeric_value = _to_float(value)
         if numeric_value is None:
-            raise HTTPException(status_code=400, detail="tfjs_predictions_json chua gia tri khong hop le")
+            raise HTTPException(status_code=400, detail="tfjs_predictions_json chứa giá trị không hợp lệ")
         predictions.append(float(numeric_value))
     return predictions
 
@@ -359,7 +359,7 @@ async def quick_analyze_scan(
     - No auth required; does not persist scan history.
     """
     if image_file is None and not image_url:
-        raise HTTPException(status_code=400, detail="Provide image_file or image_url")
+        raise HTTPException(status_code=400, detail="Vui lòng cung cấp image_file hoặc image_url")
 
     resolved_image_url = image_url
     if image_file is not None:
@@ -380,8 +380,8 @@ async def quick_analyze_scan(
         return schemas.QuickScanResponse(
             status="ood",
             message=(
-                "Khong nhan dien duoc thuc pham nay. Vui long chup lai anh ro hon "
-                "hoac thuc pham nay chua duoc AI ho tro."
+                "Không nhận diện được thực phẩm này. Vui lòng chụp lại ảnh rõ hơn "
+                "hoặc thực phẩm này chưa được AI hỗ trợ."
             ),
             max_confidence=max_confidence,
             supported_classes=AI_SUPPORTED_CLASS_NAMES,

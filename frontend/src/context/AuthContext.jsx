@@ -1,8 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import {
-  getAccessToken,
-  getStoredUser,
-  getUserProfile,
+  clearAuthSession,
   login as apiLogin,
   logout as apiLogout,
   register as apiRegister,
@@ -11,8 +9,8 @@ import {
 export const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(getStoredUser);
-  const [loading, setLoading] = useState(Boolean(getAccessToken()));
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -22,27 +20,12 @@ export const AuthProvider = ({ children }) => {
       setError('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
     };
 
-    const bootstrapSession = async () => {
-      if (!getAccessToken()) {
-        setLoading(false);
-        return;
-      }
-
-      try {
-        const profile = await getUserProfile();
-        setUser(profile);
-        localStorage.setItem('user', JSON.stringify(profile));
-        setError(null);
-      } catch (err) {
-        setUser(null);
-        setError(err.detail || 'Không thể xác thực phiên đăng nhập.');
-      } finally {
-        setLoading(false);
-      }
-    };
+    clearAuthSession();
+    setUser(null);
+    setLoading(false);
+    setError(null);
 
     window.addEventListener('freshfood:auth-expired', handleSessionExpired);
-    bootstrapSession();
     return () => window.removeEventListener('freshfood:auth-expired', handleSessionExpired);
   }, []);
 

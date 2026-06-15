@@ -18,6 +18,38 @@ from utils.cache import (
 from utils.freshness import get_customer_area, mask_customer_name
 
 router = APIRouter(prefix="/products", tags=["Products"])
+FEATURED_PRODUCT_LIMIT = 5
+
+COUNTED_ORDER_STATUSES = (
+    models.OrderStatus.PENDING,
+    models.OrderStatus.CONFIRMED,
+    models.OrderStatus.SHIPPED,
+    models.OrderStatus.DELIVERED,
+)
+
+
+def build_product_sales_subquery(db: Session):
+    return (
+        db.query(
+            models.OrderItem.product_id.label("product_id"),
+            func.coalesce(func.sum(models.OrderItem.quantity), 0).label("sold_count"),
+        )
+        .join(models.Order, models.Order.id == models.OrderItem.order_id)
+        .filter(
+            models.Order.status.in_(COUNTED_ORDER_STATUSES),
+            func.coalesce(models.Order.order_type, "normal") == "normal",
+        )
+        .group_by(models.OrderItem.product_id)
+        .subquery()
+    )
+
+
+def attach_sold_counts(rows):
+    products = []
+    for product, sold_count in rows:
+        product.sold_count = int(sold_count or 0)
+        products.append(product)
+    return products
 
 
 @router.get("/categories", response_model=List[schemas.Category])
@@ -61,13 +93,22 @@ def get_category(category_id: int, db: Session = Depends(get_db)):
 
 @router.get("/featured", response_model=List[schemas.ProductResponse])
 def read_featured_products(db: Session = Depends(get_db)):
-    return (
-        db.query(models.Product)
-        .filter(models.Product.rating >= 4.8, models.Product.is_active == True)
-        .order_by(models.Product.rating.desc(), models.Product.created_at.desc())
-        .limit(10)
+    sales_subquery = build_product_sales_subquery(db)
+    rows = (
+        db.query(
+            models.Product,
+            func.coalesce(sales_subquery.c.sold_count, 0).label("sold_count"),
+        )
+        .outerjoin(sales_subquery, sales_subquery.c.product_id == models.Product.id)
+        .filter(
+            models.Product.is_featured == True,
+            models.Product.is_active == True,
+        )
+        .order_by(models.Product.updated_at.desc(), models.Product.rating.desc(), models.Product.created_at.desc())
+        .limit(FEATURED_PRODUCT_LIMIT)
         .all()
     )
+    return attach_sold_counts(rows)
 
 
 @router.get("", response_model=List[schemas.ProductResponse])
@@ -82,7 +123,15 @@ def list_products(
     sort_by: str = "created_at",
     db: Session = Depends(get_db),
 ):
-    query = db.query(models.Product).filter(models.Product.is_active == True)
+    sales_subquery = build_product_sales_subquery(db)
+    query = (
+        db.query(
+            models.Product,
+            func.coalesce(sales_subquery.c.sold_count, 0).label("sold_count"),
+        )
+        .outerjoin(sales_subquery, sales_subquery.c.product_id == models.Product.id)
+        .filter(models.Product.is_active == True)
+    )
 
     if category_id:
         query = query.filter(models.Product.category_id == category_id)
@@ -111,18 +160,25 @@ def list_products(
     else:
         query = query.order_by(models.Product.created_at.desc())
 
-    return query.offset(skip).limit(limit).all()
+    return attach_sold_counts(query.offset(skip).limit(limit).all())
 
 
 @router.get("/{product_id}", response_model=schemas.ProductResponse)
 def get_product(product_id: int, db: Session = Depends(get_db)):
-    product = (
-        db.query(models.Product)
+    sales_subquery = build_product_sales_subquery(db)
+    row = (
+        db.query(
+            models.Product,
+            func.coalesce(sales_subquery.c.sold_count, 0).label("sold_count"),
+        )
+        .outerjoin(sales_subquery, sales_subquery.c.product_id == models.Product.id)
         .filter(models.Product.id == product_id, models.Product.is_active == True)
         .first()
     )
-    if not product:
+    if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    product, sold_count = row
+    product.sold_count = int(sold_count or 0)
     return product
 
 

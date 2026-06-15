@@ -1,44 +1,85 @@
 import React from 'react';
-import { Heart, ShoppingCart, Star } from 'lucide-react';
+import { Heart, ShoppingCart } from 'lucide-react';
 import { useFavorites } from '../../context/FavoritesContext';
+import { buildCategoryDirectory, getProductCategoryLabel } from '../../data/categorySystem';
 import { safeText } from '../../utils/text';
+import './ProductCardGrid.css';
 
 const PLACEHOLDER_IMAGE = 'https://images.unsplash.com/photo-1542838132-92c53300491e?q=80&w=640&auto=format&fit=crop';
+const FALLBACK_CATEGORY_DIRECTORY = buildCategoryDirectory();
 
 const formatPrice = (value) => {
   const number = Number(value || 0);
-  return `${number.toLocaleString('vi-VN')}d`;
+  return `${number.toLocaleString('vi-VN')}đ`;
 };
 
-const RatingStars = ({ rating }) => {
-  const score = Math.max(0, Math.min(5, Number(rating) || 0));
-  const fullStars = Math.floor(score);
-  const hasHalf = score - fullStars >= 0.5;
+const resolveDiscountBadge = (product, index, getBadge) => {
+  const discountPercent = Number(product?.discount_percent ?? 0);
+  if (Number.isFinite(discountPercent) && discountPercent > 0) {
+    return `-${Math.round(discountPercent)}%`;
+  }
 
-  return (
-    <div className="flex items-center gap-1">
-      <div className="flex items-center gap-0.5">
-        {Array.from({ length: 5 }, (_, i) => {
-          if (i < fullStars) {
-            return <Star key={i} size={11} className="fill-amber-400 text-amber-400" />;
-          }
-          if (i === fullStars && hasHalf) {
-            return (
-              <span key={i} className="relative inline-block">
-                <Star size={11} className="text-slate-200" />
-                <span className="absolute inset-0 overflow-hidden" style={{ width: '50%' }}>
-                  <Star size={11} className="fill-amber-400 text-amber-400" />
-                </span>
-              </span>
-            );
-          }
-          return <Star key={i} size={11} className="text-slate-200" />;
-        })}
-      </div>
-      <span className="text-[11px] font-bold text-amber-700">{score.toFixed(1)}</span>
-    </div>
+  const rawBadge = safeText(getBadge?.(product, index), '');
+  if (!rawBadge) return '';
+
+  const matchedPercent = rawBadge.match(/(\d+)\s*%/);
+  if (matchedPercent?.[1]) return `-${matchedPercent[1]}%`;
+  return rawBadge;
+};
+
+const resolveOriginalPrice = (product) => {
+  const currentPrice = Number(product?.price ?? product?.discount_price ?? 0);
+  const listedPrice = Number(
+    product?.original_price ??
+      product?.base_price ??
+      product?.list_price ??
+      product?.market_price ??
+      product?.regular_price ??
+      0
   );
+  if (Number.isFinite(listedPrice) && listedPrice > currentPrice) return listedPrice;
+
+  const discountPercent = Number(product?.discount_percent ?? 0);
+  if (Number.isFinite(discountPercent) && discountPercent > 0 && discountPercent < 100 && currentPrice > 0) {
+    return Math.round(currentPrice / (1 - discountPercent / 100));
+  }
+
+  return 0;
 };
+
+const resolveSoldCount = (product) =>
+  Number(
+    product?.sold_count ??
+      product?.total_sold ??
+      product?.units_sold ??
+      product?.quantity_sold ??
+      product?.sales_count ??
+      0
+  );
+
+const formatSoldLabel = (value) => {
+  const count = Math.max(0, Number(value || 0));
+  if (count === 0) return '0 đã bán';
+  if (count < 1000) return `${count.toLocaleString('vi-VN')} đã bán`;
+
+  const compact = new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    maximumFractionDigits: count >= 100000 ? 0 : 1,
+  }).format(count);
+
+  return `${compact.toLowerCase()}+ đã bán`;
+};
+
+const resolveCategoryLabel = (product, categoryLabelOverride = '') =>
+  safeText(
+    categoryLabelOverride ||
+      product?.displayCategory ||
+      getProductCategoryLabel(product, FALLBACK_CATEGORY_DIRECTORY) ||
+      product?.category ||
+      product?.category_name ||
+      product?.category?.name,
+    'Danh mục khác'
+  );
 
 const ProductCardGrid = ({
   products = [],
@@ -46,170 +87,113 @@ const ProductCardGrid = ({
   onOpenDetail,
   getBadge,
   addedProductId,
-  categoryLabelOverride = '',
   disableAddToCart = false,
+  categoryLabelOverride = '',
 }) => {
   const { isFavorite, toggleFavorite } = useFavorites();
 
   return (
-    <div className="mt-8 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <div className="product-card-grid">
       {products.map((product, index) => {
-        const badge = getBadge?.(product, index);
+        const badge = resolveDiscountBadge(product, index, getBadge);
         const image = product?.img || product?.image_url || PLACEHOLDER_IMAGE;
         const stock = Number(product?.stock ?? product?.quantity ?? 0);
+        const soldCount = resolveSoldCount(product);
         const isOutOfStock = stock <= 0;
-        const isLowStock = !isOutOfStock && stock <= 5;
         const addToCartLocked = disableAddToCart || isOutOfStock;
-        const added = addedProductId === product.id;
-        const liked = isFavorite(product.id);
-        const productName = safeText(product?.name, 'San pham');
-        const productCategory = safeText(
-          categoryLabelOverride || product?.displayCategory || product?.category,
-          'San pham tuoi'
-        );
-        const hasRating = Number(product?.rating) > 0;
+        const hasProductId = product?.id !== undefined && product?.id !== null;
+        const added = hasProductId && addedProductId === product?.id;
+        const liked = hasProductId ? isFavorite(product?.id) : false;
+        const productName = safeText(product?.name, 'Sản phẩm');
+        const categoryLabel = resolveCategoryLabel(product, categoryLabelOverride);
+        const originalPrice = resolveOriginalPrice(product);
+        const price = Number(product?.price ?? product?.discount_price ?? 0);
+        const productKey = product?.id ?? `${productName}-${index}`;
 
         return (
-          <article
-            key={product.id}
-            className="group relative flex flex-col overflow-hidden rounded-[28px] border border-[color:var(--line-soft)] bg-[color:var(--surface-0)] shadow-[var(--shadow-soft)] transition-all duration-300 hover:-translate-y-1 hover:border-emerald-200"
-          >
-            <div className="relative overflow-hidden border-b border-[color:var(--line-soft)]">
+          <article key={productKey} className="product-card-modern">
+            <div className="product-card-modern__media">
               <button
                 type="button"
                 onClick={() => onOpenDetail?.(product)}
-                className="block w-full text-left"
-                aria-label={`Xem chi tiet ${productName}`}
+                className="product-card-modern__media-button"
+                aria-label={`Xem chi tiết ${productName}`}
               >
-                <div className="aspect-[4/4.2] w-full overflow-hidden bg-[color:var(--surface-1)]">
-                  <img
-                    src={image}
-                    alt={productName}
-                    className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
-                    loading="lazy"
-                    onError={(event) => {
-                      event.currentTarget.src = PLACEHOLDER_IMAGE;
-                    }}
-                  />
-                </div>
+                <img
+                  src={image}
+                  alt={productName}
+                  className="product-card-modern__image"
+                  loading="lazy"
+                  onError={(event) => {
+                    event.currentTarget.src = PLACEHOLDER_IMAGE;
+                  }}
+                />
               </button>
 
-              {(badge || isOutOfStock || isLowStock) && (
-                <div className="pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-slate-950/20 to-transparent" />
-              )}
-
-              {badge && (
-                <span className="absolute left-3 top-3 rounded-full bg-amber-300 px-3 py-1 text-[11px] font-black text-slate-950 shadow-sm">
-                  {safeText(badge)}
-                </span>
-              )}
-
-              {isOutOfStock && (
-                <span className="absolute left-3 top-3 rounded-full bg-slate-950/85 px-3 py-1 text-[11px] font-bold text-white backdrop-blur-sm">
-                  Tam het hang
-                </span>
-              )}
-
-              {isLowStock && !isOutOfStock && !badge && (
-                <span className="absolute left-3 top-3 rounded-full bg-amber-500/90 px-3 py-1 text-[11px] font-bold text-white backdrop-blur-sm">
-                  Sap het, con {stock}
-                </span>
-              )}
+              {badge && <span className="product-card-modern__discount-badge">{safeText(badge)}</span>}
 
               <button
                 type="button"
                 onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
-                  toggleFavorite(product.id);
+                  if (!hasProductId) return;
+                  toggleFavorite(product?.id);
                 }}
-                className={`absolute right-3 top-3 inline-flex h-10 w-10 items-center justify-center rounded-full shadow-md transition-all duration-200 ${
-                  liked
-                    ? 'border border-rose-200 bg-rose-50 text-rose-500 scale-110'
-                    : 'border border-white/60 bg-white/92 text-slate-400 backdrop-blur-sm hover:scale-110 hover:text-rose-500'
+                className={`product-card-modern__favorite-button ${
+                  liked ? 'product-card-modern__favorite-button--active' : ''
                 }`}
-                aria-label={liked ? 'Bo yeu thich' : 'Them yeu thich'}
+                aria-label={liked ? 'Bỏ yêu thích' : 'Thêm yêu thích'}
               >
-                <Heart size={15} className={liked ? 'fill-current' : ''} />
+                <Heart size={15} className={liked ? 'fill-current' : ''} strokeWidth={2.2} />
               </button>
+
+              {isOutOfStock && <span className="product-card-modern__stock-badge">Hết hàng</span>}
             </div>
 
-            <div className="flex flex-1 flex-col p-4 md:p-5">
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <p className="font-category-label text-[10px] font-black uppercase tracking-[0.14em] text-emerald-700">
-                  {productCategory}
-                </p>
-                <span
-                  className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold ${
-                    isOutOfStock
-                      ? 'bg-slate-200 text-slate-700'
-                      : isLowStock
-                        ? 'bg-amber-100 text-amber-800'
-                        : 'bg-emerald-50 text-emerald-700'
-                  }`}
-                >
-                  {isOutOfStock ? 'Het hang' : isLowStock ? `Con ${stock}` : 'San sang'}
-                </span>
-              </div>
-
+            <div className="product-card-modern__body">
               <button
                 type="button"
                 onClick={() => onOpenDetail?.(product)}
-                className="mb-2 line-clamp-2 text-left text-[15px] font-black leading-[1.45] text-slate-900 transition group-hover:text-emerald-700"
+                className="product-card-modern__title-button"
               >
-                {productName}
+                <span className="product-card-modern__title">{productName}</span>
               </button>
 
-              {hasRating && (
-                <div className="mb-3">
-                  <RatingStars rating={product.rating} />
-                </div>
-              )}
-
-              <div className="mt-auto rounded-[22px] bg-[color:var(--surface-1)] p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">Gia hien tai</p>
-                    <p className="text-lg font-black leading-none text-emerald-700">
-                      {formatPrice(product?.price)}
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    disabled={addToCartLocked}
-                    onClick={() => onAddToCart?.(product)}
-                    className={`inline-flex h-11 min-w-[132px] items-center justify-center gap-2 rounded-2xl px-4 text-sm font-black transition-all duration-200 ${
-                      added
-                        ? 'bg-emerald-600 text-white'
-                        : addToCartLocked
-                          ? 'cursor-not-allowed bg-slate-200 text-slate-400'
-                          : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                    }`}
-                    aria-label={`Them ${productName} vao gio`}
-                  >
-                    <ShoppingCart size={15} />
-                    {added ? 'Da them' : isOutOfStock ? 'Het hang' : 'Them gio'}
-                  </button>
-                </div>
-
-                <div className="mt-3 flex items-center justify-between border-t border-white/70 pt-3 text-xs font-semibold text-slate-500">
-                  <span>{hasRating ? 'Khach da danh gia' : 'Moi len ke'}</span>
-                  <button
-                    type="button"
-                    onClick={() => onOpenDetail?.(product)}
-                    className="text-emerald-700 transition hover:text-emerald-800"
-                  >
-                    Xem chi tiet
-                  </button>
-                </div>
+              <div className="product-card-modern__meta-row">
+                <span className="product-card-modern__category">{categoryLabel}</span>
+                {originalPrice > price && (
+                  <span className="product-card-modern__original-price">{formatPrice(originalPrice)}</span>
+                )}
               </div>
 
-              {added && (
-                <p className="mt-2.5 rounded-xl bg-emerald-50 px-3 py-2 text-center text-xs font-bold text-emerald-700 ring-1 ring-emerald-100">
-                  Da them vao gio hang
-                </p>
-              )}
+              <div className="product-card-modern__price-row">
+                <p className="product-card-modern__price">{formatPrice(price)}</p>
+                <span className="product-card-modern__sold">{formatSoldLabel(soldCount)}</span>
+              </div>
+
+              <div className="product-card-modern__actions">
+                <button
+                  type="button"
+                  onClick={() => onOpenDetail?.(product)}
+                  className="product-card-modern__secondary-action"
+                >
+                  Chi tiết
+                </button>
+
+                <button
+                  type="button"
+                  disabled={addToCartLocked}
+                  onClick={() => onAddToCart?.(product)}
+                  className={`product-card-modern__primary-action ${
+                    added ? 'product-card-modern__primary-action--added' : ''
+                  }`}
+                  aria-label={`Thêm ${productName} vào giỏ`}
+                >
+                  <ShoppingCart size={15} strokeWidth={2.2} />
+                  {added ? 'Đã thêm' : isOutOfStock ? 'Hết hàng' : 'Thêm giỏ'}
+                </button>
+              </div>
             </div>
           </article>
         );

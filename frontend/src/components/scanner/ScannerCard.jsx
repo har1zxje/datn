@@ -43,7 +43,7 @@ const FEEDBACK_MSG = {
   sent:           '✓ Đã lưu đánh giá, cảm ơn!',
   error:          '✗ Lưu thất bại, thử lại',
   need_login:     '🔒 Đăng nhập để lưu đánh giá',
-  need_selection: '👆 Chọn loại thực phẩm trước khi nhấn Sai',
+  need_selection: '👆 Chọn loại thực phẩm trước khi báo sai',
 };
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
@@ -148,10 +148,10 @@ const ScannerCard = ({
             ) : (
               <div className="empty-viewport">
                 <div className="icon-box"><IconCamera /></div>
-                <h3>Hệ thống camera AI</h3>
+                <h3>Camera AI</h3>
                 <p>
-                  Nhấn <strong>Bắt đầu quét</strong> để kích hoạt<br />
-                  nhận diện độ tươi thực phẩm
+                  Nhấn <strong>Bắt đầu quét</strong> để mở camera<br />
+                  và kiểm tra nhanh độ tươi
                 </p>
               </div>
             )}
@@ -185,8 +185,8 @@ const ScannerCard = ({
             ) : (
               <div className="empty-viewport">
                 <div className="icon-box"><IconImage /></div>
-                <h3>Kiểm tra từ thư viện ảnh</h3>
-                <p>Chọn ảnh rõ nét, đủ sáng để AI<br />phân tích chính xác hơn</p>
+                <h3>Kiểm tra bằng ảnh</h3>
+                <p>Chọn ảnh rõ và đủ sáng để AI<br />đọc chính xác hơn</p>
               </div>
             )}
           </div>
@@ -197,7 +197,7 @@ const ScannerCard = ({
       <div className="info-sidebar">
         <div className="brand-area">
           <h1>FRESH<span>AI</span></h1>
-          <p className="subtitle">Giám sát chất lượng thực phẩm</p>
+          <p className="subtitle">Kiểm tra nhanh độ tươi</p>
         </div>
 
         {cameraError && <div className="error-banner">{cameraError}</div>}
@@ -267,7 +267,7 @@ const ScannerCard = ({
 
           {result.needsManualReview && !result.isUncertain && (
             <div className="manual-review-banner">
-              ⚠ Kết quả chưa chắc chắn — nên kiểm tra trực tiếp
+              ⚠ Kết quả chưa chắc chắn, nên kiểm tra lại
             </div>
           )}
         </div>
@@ -277,7 +277,7 @@ const ScannerCard = ({
           <div className="user-assessment-card">
             <div className="card-section-label">👤 Đánh giá của bạn</div>
 
-            <p className="assessment-prompt">Bạn nghĩ đây là loại gì?</p>
+            <p className="assessment-prompt">Bạn nghĩ đây là loại nào?</p>
             <div className="food-chip-list">
               {FOOD_OPTIONS.map((opt) => (
                 <button
@@ -295,7 +295,7 @@ const ScannerCard = ({
 
             <div className="assessment-divider" />
 
-            <p className="assessment-prompt">AI có dự đoán đúng không?</p>
+            <p className="assessment-prompt">AI đoán đúng không?</p>
             <div className="feedback-btn-row">
               <button
                 type="button"
@@ -320,7 +320,7 @@ const ScannerCard = ({
             )}
 
             {!isLoggedIn && feedbackState === 'idle' && (
-              <p className="feedback-login-hint">🔒 Đăng nhập để lưu đánh giá của bạn</p>
+              <p className="feedback-login-hint">🔒 Đăng nhập để lưu đánh giá</p>
             )}
           </div>
         )}

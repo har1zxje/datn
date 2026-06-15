@@ -34,14 +34,14 @@ const Footer = () => {
                 FreshFood <span className="text-emerald-400">AI</span>
               </h2>
               <p className="mt-1 text-xs font-semibold uppercase tracking-widest text-emerald-400">
-                Trust visible, freshness first
+                Chọn tươi, mua gọn
               </p>
             </div>
             <p className="text-sm leading-7 text-slate-300/80">
-              Nen tang mua sam thuc pham tuoi song ket hop AI danh gia do tuoi, giup nguoi dung scan, dat hang va kiem chung sau giao trong cung mot luong ro rang.
+              Mua thực phẩm tươi, theo dõi đơn và xác minh sau giao trong một luồng rõ ràng.
             </p>
             <div>
-              <p className="mb-3 text-xs font-bold uppercase tracking-wider text-emerald-600">Theo doi chung toi</p>
+              <p className="mb-3 text-xs font-bold uppercase tracking-wider text-emerald-600">Theo dõi chúng tôi</p>
               <div className="flex items-center gap-2">
                 <a
                   href="#"
@@ -69,29 +69,29 @@ const Footer = () => {
           </div>
 
           <div className="space-y-4">
-            <h3 className="text-xs font-black uppercase tracking-[0.1em] text-emerald-400">Kham pha</h3>
-            <nav className="flex flex-col gap-3 text-sm" aria-label="Lien ket nhanh">
+            <h3 className="text-xs font-black uppercase tracking-[0.1em] text-emerald-400">Khám phá</h3>
+            <nav className="flex flex-col gap-3 text-sm" aria-label="Liên kết nhanh">
               <Link to="/" className="flex items-center gap-2 text-emerald-300/80 transition hover:text-white">
                 <span className="h-1 w-1 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />
-                Trang chu
+                Trang chủ
               </Link>
               <Link to="/shop" className="flex items-center gap-2 text-emerald-300/80 transition hover:text-white">
                 <ShoppingBag size={13} className="shrink-0 text-emerald-500" />
-                Cua hang
+                Cửa hàng
               </Link>
               <Link to="/favorites" className="flex items-center gap-2 text-emerald-300/80 transition hover:text-white">
                 <Heart size={13} className="shrink-0 text-emerald-500" />
-                Yeu thich
+                Yêu thích
               </Link>
               <Link to="/auth" className="flex items-center gap-2 text-emerald-300/80 transition hover:text-white">
                 <span className="h-1 w-1 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />
-                Dang nhap / Dang ky
+                Đăng nhập / Đăng ký
               </Link>
             </nav>
           </div>
 
           <div className="space-y-4">
-            <h3 className="text-xs font-black uppercase tracking-[0.1em] text-emerald-400">Lien he</h3>
+            <h3 className="text-xs font-black uppercase tracking-[0.1em] text-emerald-400">Liên hệ</h3>
             <div className="flex flex-col gap-3.5 text-sm">
               <a href="tel:0968381138" className="flex items-start gap-2.5 text-emerald-300/80 transition hover:text-white">
                 <Phone size={14} className="mt-0.5 shrink-0 text-emerald-500" />
@@ -103,18 +103,18 @@ const Footer = () => {
               </a>
               <div className="flex items-start gap-2.5 text-emerald-300/80">
                 <MapPin size={14} className="mt-0.5 shrink-0 text-emerald-500" />
-                <span>TP. Ho Chi Minh, Viet Nam</span>
+                <span>TP. Hồ Chí Minh, Việt Nam</span>
               </div>
             </div>
           </div>
 
           <div className="space-y-4">
-            <h3 className="text-xs font-black uppercase tracking-[0.1em] text-emerald-400">Van hanh</h3>
+            <h3 className="text-xs font-black uppercase tracking-[0.1em] text-emerald-400">Vận hành</h3>
             <div className="flex flex-col gap-3 text-sm text-slate-300/80">
-              <p>Giao dien duoc thiet ke de lam ro tinh trang don hang, dia chi giao va ket qua xac nhan do tuoi ma khong thay doi logic van hanh san co.</p>
+              <p>Theo dõi đơn, địa chỉ giao và xác minh độ tươi ở cùng một nơi.</p>
               <div className="mt-1 flex items-center gap-2 rounded-xl bg-slate-900 px-3 py-2.5 text-xs font-semibold text-slate-300">
                 <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-emerald-400" aria-hidden="true" />
-                Post-delivery freshness confirmation is active
+                Xác minh sau giao đang hoạt động
               </div>
             </div>
           </div>
@@ -124,7 +124,7 @@ const Footer = () => {
       <div className="border-t border-slate-900">
         <div className="fresh-container flex flex-col items-center justify-between gap-2 py-5 text-xs text-slate-500 sm:flex-row">
           <p>© 2026 FreshFood AI.</p>
-          <p>Built for trust-first fresh commerce in Viet Nam</p>
+          <p>Thiết kế cho trải nghiệm mua thực phẩm tươi tại Việt Nam</p>
         </div>
       </div>
     </footer>

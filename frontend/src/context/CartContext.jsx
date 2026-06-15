@@ -31,25 +31,16 @@ const saveCart = (owner, items) => {
   }
 };
 
-const clearCart = (owner) => {
-  try {
-    localStorage.removeItem(storageKey(owner));
-  } catch { /* noop */ }
-};
-
 export const CartProvider = ({ children }) => {
   const { user, loading } = useAuth();
-  const canUseCart = !user?.is_admin;
-
+  const canUseCart = true;
   const ownerRef = useRef(resolveCartOwner(user));
 
-  // Khởi tạo cart từ localStorage theo owner hiện tại
   const [cartItems, setCartItems] = useState(() => {
     const owner = resolveCartOwner(user);
-    return canUseCart ? loadCart(owner) : [];
+    return loadCart(owner);
   });
 
-  // Khi user thay đổi (đăng nhập/đăng xuất): load cart của owner mới
   useEffect(() => {
     if (loading) return;
 
@@ -57,41 +48,20 @@ export const CartProvider = ({ children }) => {
     if (ownerRef.current === nextOwner) return;
 
     ownerRef.current = nextOwner;
-
-    if (!user?.is_admin) {
-      setCartItems(loadCart(nextOwner));
-    } else {
-      setCartItems([]);
-    }
+    setCartItems(loadCart(nextOwner));
   }, [user, loading]);
 
-  // Admin không được dùng cart — clear ngay nếu bị switch
-  useEffect(() => {
-    if (!canUseCart && cartItems.length > 0) {
-      setCartItems([]);
-    }
-  }, [canUseCart]);
-
-  // Đồng bộ xuống localStorage mỗi khi cartItems thay đổi
   useEffect(() => {
     if (loading) return;
-    const owner = ownerRef.current;
-    if (canUseCart) {
-      saveCart(owner, cartItems);
-    } else {
-      clearCart(owner);
-    }
-  }, [cartItems, loading, canUseCart]);
-
-  // ---- Actions ----
+    saveCart(ownerRef.current, cartItems);
+  }, [cartItems, loading]);
 
   const addToCart = (product, quantity = 1) => {
-    if (!canUseCart) return false;
     setCartItems((prev) => {
-      const exist = prev.find((item) => item.id === product.id);
-      if (exist) {
+      const existing = prev.find((item) => item.id === product.id);
+      if (existing) {
         return prev.map((item) =>
-          item.id === product.id ? { ...item, qty: item.qty + quantity } : item
+          item.id === product.id ? { ...item, qty: item.qty + quantity } : item,
         );
       }
       return [...prev, { ...product, qty: quantity }];
@@ -103,7 +73,6 @@ export const CartProvider = ({ children }) => {
     setCartItems((prev) => prev.filter((item) => item.id !== id));
   };
 
-  /** Xóa nhiều sản phẩm cùng lúc theo danh sách id — dùng sau khi checkout chọn lọc */
   const removeItems = (ids) => {
     const idSet = new Set(ids);
     setCartItems((prev) => prev.filter((item) => !idSet.has(item.id)));
@@ -115,7 +84,7 @@ export const CartProvider = ({ children }) => {
       return;
     }
     setCartItems((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, qty: quantity } : item))
+      prev.map((item) => (item.id === id ? { ...item, qty: quantity } : item)),
     );
   };
 

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Boolean, Text, Enum, JSON, DECIMAL
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Boolean, Text, Enum, JSON, DECIMAL, UniqueConstraint
 from sqlalchemy.orm import relationship
 from database import Base
 import datetime
@@ -105,6 +105,8 @@ class User(Base):
     delivery_profiles = relationship("DeliveryProfile", back_populates="user", cascade="all, delete-orphan")
     freshness_reviews = relationship("FreshnessReview", back_populates="user", cascade="all, delete-orphan")
     freshness_complaints = relationship("FreshnessComplaint", back_populates="user", cascade="all, delete-orphan")
+    verification_reports = relationship("VerificationReport", back_populates="user", cascade="all, delete-orphan")
+    generated_vouchers = relationship("GeneratedVoucher", back_populates="user", cascade="all, delete-orphan")
     notifications = relationship("UserNotification", back_populates="user", cascade="all, delete-orphan")
 
     @property
@@ -145,6 +147,9 @@ class Product(Base):
     # Pricing
     price = Column(DECIMAL(10, 2), nullable=False)
     discount_price = Column(DECIMAL(10, 2))
+    promotion_type = Column(String(20), default="none")
+    promotion_value = Column(DECIMAL(10, 2), default=0)
+    promotion_label = Column(String(120))
     
     # Stock
     quantity = Column(Integer, default=0)
@@ -181,6 +186,20 @@ class Product(Base):
     order_items = relationship("OrderItem", back_populates="product")
     reviews = relationship("Review", back_populates="product", cascade="all, delete-orphan")
     freshness_reviews = relationship("FreshnessReview", back_populates="product", cascade="all, delete-orphan")
+    verification_reports = relationship("VerificationReport", back_populates="product", cascade="all, delete-orphan")
+
+    @property
+    def discount_percent(self) -> float:
+        try:
+            base_price = float(self.price or 0)
+            sale_price = float(self.discount_price or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+        if base_price <= 0 or sale_price <= 0 or sale_price >= base_price:
+            return 0.0
+
+        return round((base_price - sale_price) / base_price * 100, 2)
 
 class Order(Base):
     __tablename__ = "orders"
@@ -207,6 +226,8 @@ class Order(Base):
     payment_status = Column(Enum(PaymentStatus, values_callable=enum_values, native_enum=False), default=PaymentStatus.PENDING)
     order_type = Column(String(30), default="normal")
     replacement_parent_order_id = Column(Integer, ForeignKey("orders.id"))
+    voucher_code = Column(String(60))
+    points_redeemed = Column(Integer, default=0)
     
     # Notes
     notes = Column(Text)
@@ -222,6 +243,7 @@ class Order(Base):
     owner = relationship("User", back_populates="orders")
     items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
     freshness_reviews = relationship("FreshnessReview", back_populates="order", cascade="all, delete-orphan")
+    verification_reports = relationship("VerificationReport", back_populates="order", cascade="all, delete-orphan")
     freshness_complaints = relationship(
         "FreshnessComplaint",
         back_populates="order",
@@ -258,7 +280,7 @@ class OrderItem(Base):
     def product_name(self) -> str:
         if self.product and self.product.name:
             return self.product.name
-        return f"San pham #{self.product_id}"
+        return f"Sản phẩm #{self.product_id}"
 
     @property
     def ai_supported(self) -> bool:
@@ -367,6 +389,9 @@ class DeliveryProfile(Base):
 
 class FreshnessReview(Base):
     __tablename__ = "freshness_reviews"
+    __table_args__ = (
+        UniqueConstraint("order_item_id", "user_id", name="uq_freshness_reviews_order_item_user"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     order_id = Column(Integer, ForeignKey("orders.id"), nullable=False, index=True)
@@ -377,6 +402,13 @@ class FreshnessReview(Base):
     ai_label = Column(String(20))
     ai_confidence = Column(Float)
     freshness_score = Column(Integer)
+    predicted_label = Column(String(120))
+    predicted_result = Column(String(40))
+    is_prediction_correct = Column(Boolean)
+    correct_label = Column(String(120))
+    correct_result = Column(String(40))
+    reward_points = Column(Integer, default=0)
+    voucher_id = Column(Integer, ForeignKey("generated_vouchers.id"), index=True)
     manual_rating = Column(String(20))
     manual_note = Column(Text)
     is_public = Column(Boolean, default=True)
@@ -386,6 +418,7 @@ class FreshnessReview(Base):
     order_item = relationship("OrderItem", back_populates="freshness_reviews")
     user = relationship("User", back_populates="freshness_reviews")
     product = relationship("Product", back_populates="freshness_reviews")
+    voucher = relationship("GeneratedVoucher", back_populates="freshness_reviews")
 
 
 class FreshnessComplaint(Base):
@@ -407,6 +440,48 @@ class FreshnessComplaint(Base):
     order = relationship("Order", foreign_keys=[order_id], back_populates="freshness_complaints")
     user = relationship("User", back_populates="freshness_complaints")
     replacement_order = relationship("Order", foreign_keys=[replacement_order_id])
+
+
+class VerificationReport(Base):
+    __tablename__ = "verification_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False, index=True)
+    order_item_id = Column(Integer, ForeignKey("order_items.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
+    product_name = Column(String(255), nullable=False)
+    image_base64 = Column(Text, nullable=False)
+    prediction_label = Column(String(120))
+    prediction_freshness = Column(String(40))
+    prediction_confidence = Column(Float)
+    scan_correct = Column(Boolean)
+    user_feedback = Column(Boolean)
+    points_awarded = Column(Integer, default=0)
+    voucher_code = Column(String(60))
+    is_read = Column(Boolean, default=False)
+    read_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+
+    order = relationship("Order", back_populates="verification_reports")
+    user = relationship("User", back_populates="verification_reports")
+    product = relationship("Product", back_populates="verification_reports")
+
+
+class GeneratedVoucher(Base):
+    __tablename__ = "generated_vouchers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    source_order_id = Column(Integer, ForeignKey("orders.id"), nullable=True, index=True)
+    code = Column(String(60), unique=True, nullable=False, index=True)
+    reason = Column(String(80), nullable=False, index=True)
+    title = Column(String(120), nullable=False, default="Voucher tri ân")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+
+    user = relationship("User", back_populates="generated_vouchers")
+    source_order = relationship("Order")
+    freshness_reviews = relationship("FreshnessReview", back_populates="voucher")
 
 
 class UserNotification(Base):
@@ -457,7 +532,7 @@ class PaymentQRCodeSetting(Base):
     __tablename__ = "payment_qr_settings"
 
     id = Column(Integer, primary_key=True, index=True)
-    provider_name = Column(String(100), nullable=False, default="Chuyen khoan")
+    provider_name = Column(String(100), nullable=False, default="Chuyển khoản")
     image_url = Column(Text, nullable=False)
     updated_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, index=True)

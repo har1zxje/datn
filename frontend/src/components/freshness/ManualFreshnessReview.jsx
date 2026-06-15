@@ -2,16 +2,16 @@ import React from 'react';
 import { ClipboardPenLine } from 'lucide-react';
 
 const OPTIONS = [
-  { value: 'good', label: 'Tuoi tot', hint: 'San pham dat ky vong va co the dung binh thuong.' },
-  { value: 'normal', label: 'Binh thuong', hint: 'San pham chap nhan duoc nhung nen dung som.' },
-  { value: 'poor', label: 'Kem tuoi', hint: 'San pham khong dat ky vong, can ghi chu them neu can.' },
+  { value: 'good', label: 'Tươi tốt', hint: 'Sản phẩm đạt kỳ vọng và có thể dùng bình thường.' },
+  { value: 'normal', label: 'Bình thường', hint: 'Sản phẩm chấp nhận được nhưng nên dùng sớm.' },
+  { value: 'poor', label: 'Kém tươi', hint: 'Sản phẩm không đạt kỳ vọng, cần ghi chú thêm nếu cần.' },
 ];
 
 const ManualFreshnessReview = ({
   rating,
   note,
-  title = 'Danh gia thu cong',
-  description = 'Dung khi san pham chua duoc AI ho tro hoac can thay the ket qua AI.',
+  title = 'Đánh giá thủ công',
+  description = 'Dùng khi sản phẩm chưa được AI hỗ trợ hoặc cần thay thế kết quả AI.',
   onRatingChange,
   onNoteChange,
 }) => (
@@ -48,12 +48,12 @@ const ManualFreshnessReview = ({
     </div>
 
     <label className="mt-4 block">
-      <span className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">Ghi chu tuy chon</span>
+      <span className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">Ghi chú tùy chọn</span>
       <textarea
         value={note}
         onChange={(event) => onNoteChange(event.target.value)}
         rows={3}
-        placeholder="Mo ta ngan gon tinh trang san pham neu can."
+        placeholder="Mô tả ngắn gọn tình trạng sản phẩm nếu cần."
         className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-emerald-500 focus:bg-white"
       />
     </label>

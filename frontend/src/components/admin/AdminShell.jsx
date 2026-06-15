@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, House, LogOut, Menu, RefreshCcw, ShieldCheck, X } from 'lucide-react';
+import { Bell, ChevronLeft, ChevronRight, House, LogOut, Menu, RefreshCcw, ShieldCheck, X } from 'lucide-react';
 
 const baseTabButton =
-  'group relative flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left text-sm font-semibold transition-all';
+  'group relative flex w-full items-center gap-3 rounded-2xl border border-transparent px-3 py-3 text-left text-sm font-semibold transition-all';
 
 const AdminShell = ({
   user,
@@ -17,6 +17,7 @@ const AdminShell = ({
   onRefresh,
   onGoHome,
   onLogout,
+  notificationCount = 0,
   children,
 }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -33,22 +34,26 @@ const AdminShell = ({
     [activeTab, tabs],
   );
 
+  const roleLabel = user?.role === 'staff' ? 'Nhân viên' : 'Quản trị viên';
+  const userName = user?.full_name || user?.username || 'Admin';
+  const userInitial = userName.trim().charAt(0).toUpperCase();
+
   const handleSelectTab = (nextTab) => {
     onTabChange(nextTab);
     setMobileOpen(false);
   };
 
   const renderSidebarContent = (compact) => (
-    <div className="flex h-full flex-col gap-6">
+    <div className="flex h-full flex-col gap-5">
       <div className="flex items-center justify-between gap-3">
         <div className={`flex items-center gap-3 ${compact ? 'lg:justify-center' : ''}`}>
-          <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-sm shadow-emerald-200">
-            <ShieldCheck size={22} />
+          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-sm shadow-emerald-200">
+            <ShieldCheck size={20} />
           </span>
           {!compact && (
             <div className="min-w-0">
-              <p className="text-sm font-black uppercase tracking-[0.22em] text-emerald-700">FreshFood AI</p>
-              <p className="text-xs font-semibold text-slate-500">Admin workspace</p>
+              <p className="text-sm font-black uppercase tracking-[0.2em] text-emerald-700">FreshFood AI</p>
+              <p className="text-xs font-medium text-slate-500">Khu vực quản trị</p>
             </div>
           )}
         </div>
@@ -57,13 +62,13 @@ const AdminShell = ({
           type="button"
           onClick={onToggleCollapsed}
           className="hidden h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:bg-slate-50 lg:inline-flex"
-          aria-label={collapsed ? 'Expand admin sidebar' : 'Collapse admin sidebar'}
+          aria-label={collapsed ? 'Mở rộng thanh bên quản trị' : 'Thu gọn thanh bên quản trị'}
         >
           {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
         </button>
       </div>
 
-      <nav className="flex-1 space-y-2" aria-label="Admin navigation">
+      <nav className="flex-1 space-y-1.5" aria-label="Điều hướng quản trị">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const selected = tab.key === activeTab;
@@ -75,13 +80,13 @@ const AdminShell = ({
               onClick={() => handleSelectTab(tab.key)}
               className={`${baseTabButton} ${
                 selected
-                  ? 'border-emerald-200 bg-emerald-50 text-emerald-800 shadow-sm'
-                  : 'border-transparent text-slate-600 hover:border-slate-200 hover:bg-slate-50 hover:text-slate-950'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                  : 'text-slate-600 hover:border-slate-200 hover:bg-slate-50 hover:text-slate-950'
               } ${compact ? 'lg:justify-center lg:px-0' : ''}`}
             >
               <span
-                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${
-                  selected ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-200' : 'bg-white text-slate-500'
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${
+                  selected ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-200' : 'bg-slate-100 text-slate-500'
                 }`}
               >
                 <Icon size={18} />
@@ -106,15 +111,15 @@ const AdminShell = ({
         })}
       </nav>
 
-      <div className={`rounded-3xl border border-slate-200 bg-slate-50/80 p-4 shadow-sm ${compact ? 'lg:px-3' : ''}`}>
+      <div className={`rounded-[24px] border border-slate-200 bg-slate-50 p-4 ${compact ? 'lg:px-3' : ''}`}>
         <div className={`flex items-center gap-3 ${compact ? 'lg:justify-center' : ''}`}>
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-sm font-black text-white">
-            {(user?.full_name || user?.username || 'A').trim().charAt(0).toUpperCase()}
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-sm font-black text-white">
+            {userInitial}
           </span>
           {!compact && (
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-bold text-slate-950">{user?.full_name || user?.username || 'Admin'}</p>
-              <p className="truncate text-xs text-slate-500">{user?.role === 'staff' ? 'Nhan vien' : 'Quan tri vien'}</p>
+              <p className="truncate text-sm font-bold text-slate-950">{userName}</p>
+              <p className="truncate text-xs text-slate-500">{roleLabel}</p>
             </div>
           )}
         </div>
@@ -130,7 +135,7 @@ const AdminShell = ({
             title="Quay lại trang chủ"
           >
             <House size={16} />
-            {!compact && <span>Trang chu</span>}
+            {!compact && <span>Trang chủ</span>}
           </button>
 
           <button
@@ -143,7 +148,7 @@ const AdminShell = ({
             title="Đăng xuất"
           >
             <LogOut size={16} />
-            {!compact && <span>Dang xuat</span>}
+            {!compact && <span>Đăng xuất</span>}
           </button>
         </div>
       </div>
@@ -151,11 +156,11 @@ const AdminShell = ({
   );
 
   return (
-    <div className="min-h-screen bg-transparent">
+    <div className="min-h-screen bg-[oklch(0.985_0.008_150)]">
       <div className="flex min-h-screen">
         <aside
-          className={`sticky top-0 hidden h-screen shrink-0 border-r border-slate-200/80 bg-white/92 px-4 py-5 shadow-[18px_0_45px_rgba(15,23,42,0.05)] backdrop-blur lg:block ${
-            collapsed ? 'w-24' : 'w-[292px]'
+          className={`sticky top-0 hidden h-screen shrink-0 border-r border-slate-200/80 bg-[rgba(252,253,252,0.96)] px-4 py-5 backdrop-blur lg:block ${
+            collapsed ? 'w-24' : 'w-[278px]'
           }`}
         >
           {renderSidebarContent(collapsed)}
@@ -165,9 +170,9 @@ const AdminShell = ({
           <div className="fixed inset-0 z-[90] lg:hidden">
             <button
               type="button"
-              aria-label="Close admin navigation"
+              aria-label="Đóng điều hướng quản trị"
               onClick={() => setMobileOpen(false)}
-              className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm"
+              className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm"
             />
             <aside className="absolute inset-y-0 left-0 flex w-[min(310px,88vw)] flex-col border-r border-slate-200 bg-white px-4 py-5 shadow-2xl">
               <div className="mb-4 flex items-center justify-end">
@@ -175,7 +180,7 @@ const AdminShell = ({
                   type="button"
                   onClick={() => setMobileOpen(false)}
                   className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-500"
-                  aria-label="Close admin navigation"
+                  aria-label="Đóng điều hướng quản trị"
                 >
                   <X size={18} />
                 </button>
@@ -186,40 +191,61 @@ const AdminShell = ({
         )}
 
         <div className="min-w-0 flex-1">
-          <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/88 px-4 py-4 backdrop-blur md:px-6 lg:px-8">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex items-start gap-3">
+          <header className="sticky top-0 z-40 h-14 border-b border-slate-200/85 bg-[rgba(252,253,252,0.94)] px-4 backdrop-blur md:px-6 lg:px-8">
+            <div className="flex h-full items-center justify-between gap-4">
+              <div className="flex min-w-0 items-center gap-3" title={`${title}. ${subtitle}`}>
                 <button
                   type="button"
                   onClick={() => setMobileOpen(true)}
-                  className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 text-slate-600 lg:hidden"
-                  aria-label="Open admin navigation"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 text-slate-600 lg:hidden"
+                  aria-label="Mở điều hướng quản trị"
                 >
                   <Menu size={18} />
                 </button>
-                <div>
-                  <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-700">
-                    {activeTabMeta?.label || 'Admin'}
+                <div className="min-w-0">
+                  <p className="truncate text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                    Admin / <span className="text-slate-700">{activeTabMeta?.label || title}</span>
                   </p>
-                  <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-950 md:text-[2rem]">
-                    {title}
-                  </h1>
-                  <p className="mt-1 max-w-3xl text-sm text-slate-500">{subtitle}</p>
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={onRefresh}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
-              >
-                <RefreshCcw size={16} className={refreshing ? 'animate-spin' : ''} />
-                Lam moi
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onRefresh}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 md:px-4"
+                >
+                  <RefreshCcw size={16} className={refreshing ? 'animate-spin' : ''} />
+                  <span className="hidden sm:inline">Làm mới</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="relative inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50"
+                  aria-label="Thông báo"
+                >
+                  <Bell size={16} />
+                  {notificationCount > 0 ? (
+                    <span className="absolute right-1.5 top-1.5 inline-flex min-w-4 items-center justify-center rounded-full bg-emerald-600 px-1 text-[10px] font-black leading-4 text-white">
+                      {notificationCount > 9 ? '9+' : notificationCount}
+                    </span>
+                  ) : null}
+                </button>
+
+                <div className="hidden items-center gap-3 rounded-2xl border border-slate-200 bg-white px-2.5 py-1.5 md:flex">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-900 text-xs font-black text-white">
+                    {userInitial}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-slate-900">{userName}</p>
+                    <p className="truncate text-[11px] text-slate-500">{roleLabel}</p>
+                  </div>
+                </div>
+              </div>
             </div>
           </header>
 
-          <main className="px-4 py-5 md:px-6 md:py-6 lg:px-8 lg:py-8">{children}</main>
+          <main className="px-4 py-5 md:px-6 md:py-6 lg:px-8 lg:py-7">{children}</main>
         </div>
       </div>
     </div>

@@ -1,20 +1,27 @@
-Impeccable. Design fluency for AI harnesses.
-https://impeccable.style
+FreshFood AI project note
 
-This folder contains skills for all supported tools:
+File README.txt nay da duoc doi noi dung vi ban cu la boilerplate "Impeccable" khong lien quan den ung dung.
 
-  .cursor/    -> Cursor
-  .claude/    -> Claude Code
-  .gemini/    -> Gemini CLI
-  .codex/     -> Legacy bundle folder in this ZIP (Codex CLI uses .agents/)
-  .agents/    -> Codex CLI
-  .github/    -> GitHub Copilot
-  .kiro/      -> Kiro
-  .opencode/  -> OpenCode
-  .pi/        -> Pi
-  .trae-cn/   -> Trae China
-  .trae/      -> Trae International
+Nhung thu muc nhu:
+  .agents/
+  .claude/
+  .codex/
+  .cursor/
+  .gemini/
+  .kiro/
+  .opencode/
+  .pi/
+  .rovodev/
+  .trae/
+  .trae-cn/
 
-To install, copy the relevant folder(s) into your project root.
-For Codex, repo and user skill installs come from .agents/skills.
-These are hidden folders (dotfiles). Press Cmd+Shift+. in Finder to see them.
+chi la cau hinh cho cong cu AI/agent, khong phai source code chinh cua FreshFood AI.
+
+Phan code can doc va chay nam trong:
+  backend/
+  frontend/
+  model_training/
+  n8n/
+  ops/
+
+Xem README goc tai thu muc repo de biet mo ta du an va cac buoc chay.

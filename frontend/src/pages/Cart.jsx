@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
   CheckCircle2,
+  Gift,
   Loader2,
   MapPin,
   Minus,
@@ -22,19 +23,24 @@ import {
   createDeliveryProfile,
   createOrder,
   getDeliveryProfiles,
+  getMyVouchers,
+  getPaymentQRCode,
 } from '../services/api';
 import { uiLayout } from '../styles/uiTokens';
 
-const QR_IMAGE_URL =
-  'https://img.vietqr.io/image/MB-0349987654-compact2.jpg?amount=0&addInfo=ThanhToanDonHang&accountName=FRESHFOOD';
-
 const VN_PHONE_REGEX = /^0[0-9]{9}$/;
+const TAX_RATE = 0.1;
 const emptyNewProfile = { full_name: '', phone: '', address: '', city: '', is_default: false };
 
 // ---- Helpers ----
 
 const parsePrice = (price) =>
   typeof price === 'number' ? price : parseInt(String(price).replace(/\./g, ''), 10);
+
+const formatDateTime = (value) => {
+  if (!value) return '—';
+  return new Date(value).toLocaleString('vi-VN');
+};
 
 const PaymentMethodCard = ({ value, selected, onSelect, icon: Icon, label, description }) => (
   <button
@@ -63,7 +69,7 @@ const PaymentMethodCard = ({ value, selected, onSelect, icon: Icon, label, descr
 
 const Cart = () => {
   const { cartItems, updateQuantity, removeFromCart, removeItems, clearCart, getCartTotal, isEmpty, canUseCart } = useCart();
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const navigate = useNavigate();
 
   // Sản phẩm được chọn để thanh toán (Set<id>)
@@ -92,9 +98,16 @@ const Cart = () => {
   const [newProfile, setNewProfile] = useState(emptyNewProfile);
   const [newProfileErrors, setNewProfileErrors] = useState({});
   const [savingNewProfile, setSavingNewProfile] = useState(false);
+  const [vouchers, setVouchers] = useState([]);
+  const [loadingVouchers, setLoadingVouchers] = useState(false);
+  const [selectedVoucherCode, setSelectedVoucherCode] = useState('');
+  const [pointsToRedeem, setPointsToRedeem] = useState(0);
 
   // Payment
   const [paymentMethod, setPaymentMethod] = useState('cod');
+  const [paymentQr, setPaymentQr] = useState(null);
+  const [paymentQrLoading, setPaymentQrLoading] = useState(false);
+  const [paymentQrImageError, setPaymentQrImageError] = useState(false);
 
   // ---- Derived ----
 
@@ -103,8 +116,22 @@ const Cart = () => {
   const someSelected = selectedIds.size > 0 && selectedIds.size < cartItems.length;
 
   const subtotal = getCartTotal(selectedItems);
+  const taxAmount = selectedItems.length > 0 ? Math.round(subtotal * TAX_RATE) : 0;
   const shippingFee = selectedItems.length > 0 ? (subtotal > 500000 ? 0 : 30000) : 0;
-  const finalTotal = subtotal + shippingFee;
+  const totalBeforeDiscount = subtotal + taxAmount + shippingFee;
+  const selectedVoucher = vouchers.find((voucher) => voucher.code === selectedVoucherCode) || null;
+  const voucherDiscount = selectedVoucher
+    ? Math.min(
+        Math.round(totalBeforeDiscount * (Number(selectedVoucher.discount_percent || 0) / 100)),
+        totalBeforeDiscount,
+      )
+    : 0;
+  const maxRedeemablePoints = Math.max(0, Math.min(
+    Number(user?.loyalty_points || 0),
+    totalBeforeDiscount - voucherDiscount,
+  ));
+  const normalizedPointsToRedeem = Math.max(0, Math.min(Number(pointsToRedeem || 0), maxRedeemablePoints));
+  const finalTotal = Math.max(0, totalBeforeDiscount - voucherDiscount - normalizedPointsToRedeem);
 
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId) ?? null;
 
@@ -143,6 +170,49 @@ const Cart = () => {
       .finally(() => setLoadingProfiles(false));
   }, [user, canUseCart]);
 
+  useEffect(() => {
+    if (!user || !canUseCart) return;
+    setLoadingVouchers(true);
+    getMyVouchers()
+      .then((data) => {
+        const available = data.filter((voucher) => !voucher.is_used && !voucher.is_expired);
+        setVouchers(available);
+        setSelectedVoucherCode((prev) => (
+          available.some((voucher) => voucher.code === prev) ? prev : ''
+        ));
+      })
+      .catch(() => setVouchers([]))
+      .finally(() => setLoadingVouchers(false));
+  }, [user, canUseCart]);
+
+  useEffect(() => {
+    let isActive = true;
+    setPaymentQrLoading(true);
+
+    getPaymentQRCode()
+      .then((data) => {
+        if (isActive) setPaymentQr(data);
+      })
+      .catch(() => {
+        if (isActive) setPaymentQr(null);
+      })
+      .finally(() => {
+        if (isActive) setPaymentQrLoading(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    setPaymentQrImageError(false);
+  }, [paymentQr?.image_url]);
+
+  useEffect(() => {
+    setPointsToRedeem((prev) => Math.max(0, Math.min(Number(prev || 0), maxRedeemablePoints)));
+  }, [maxRedeemablePoints]);
+
   // ---- New profile form ----
 
   const validateNewProfile = () => {
@@ -179,10 +249,6 @@ const Cart = () => {
 
   const handleCheckout = async () => {
     if (!user) { navigate('/auth'); return; }
-    if (!canUseCart || user?.is_admin) {
-      setError('Tài khoản admin chỉ dùng để quản trị, không thể mua hàng.');
-      return;
-    }
     if (selectedItems.length === 0) {
       setError('Vui lòng chọn ít nhất một sản phẩm để thanh toán.');
       return;
@@ -202,10 +268,17 @@ const Cart = () => {
         shipping_city: selectedProfile.city,
         shipping_phone: selectedProfile.phone,
         payment_method: paymentMethod,
+        voucher_code: selectedVoucherCode || null,
+        points_to_redeem: normalizedPointsToRedeem,
       };
 
       const response = await createOrder(orderData);
       if (response) {
+        if (response.owner?.loyalty_points != null) {
+          updateUser({
+            loyalty_points: Number(response.owner.loyalty_points || 0),
+          });
+        }
         // Chỉ xóa các sản phẩm đã chọn — sản phẩm còn lại ở lại giỏ
         removeItems([...selectedIds]);
         navigate('/profile', {
@@ -223,32 +296,6 @@ const Cart = () => {
   };
 
   // ---- Guards ----
-
-  if (user?.is_admin || !canUseCart) {
-    return (
-      <div className={uiLayout.page}>
-        <div className={uiLayout.container}>
-          <section className="mx-auto max-w-3xl rounded-2xl border border-rose-200 bg-white p-8 text-center shadow-sm md:p-12">
-            <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-rose-50 text-rose-700">
-              <ShieldCheck size={28} />
-            </div>
-            <h1 className="text-2xl font-black text-slate-950 md:text-3xl">Tài khoản admin không mua hàng</h1>
-            <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-slate-600 md:text-base">
-              Vui lòng đăng nhập bằng tài khoản khách hàng nếu bạn cần đặt đơn.
-            </p>
-            <button
-              type="button"
-              onClick={() => navigate('/admin/dashboard')}
-              className="mt-8 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-3 text-sm font-black text-white transition hover:bg-emerald-700"
-            >
-              Đến trang quản trị
-            </button>
-          </section>
-        </div>
-      </div>
-    );
-  }
-
   if (isEmpty) {
     return (
       <div className={uiLayout.page}>
@@ -257,9 +304,9 @@ const Cart = () => {
             <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
               <ShoppingCart size={28} />
             </div>
-            <h1 className="text-2xl font-black text-slate-950 md:text-3xl">Giỏ hàng đang trống</h1>
+            <h1 className="text-2xl font-black text-slate-950 md:text-3xl">Giỏ hàng trống</h1>
             <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-slate-600 md:text-base">
-              Bạn chưa có sản phẩm nào trong giỏ. Chọn thêm rau củ, thịt cá hoặc gia vị để tiếp tục đơn hàng.
+              Chưa có sản phẩm nào trong giỏ. Chọn thêm món cần mua để tiếp tục.
             </p>
             <Link
               to="/shop"
@@ -280,7 +327,7 @@ const Cart = () => {
     <div className={uiLayout.page}>
       <div className={uiLayout.container}>
         <section className="mb-10 flex flex-col gap-3 rounded-[30px] border border-[color:var(--line-soft)] bg-[linear-gradient(135deg,rgba(15,154,98,0.10),rgba(216,169,52,0.08),rgba(255,255,255,0.96))] p-6 shadow-[var(--shadow-soft)] md:mb-12 md:p-8">
-          <h1 className="text-3xl font-black tracking-tight text-slate-950 md:text-[2.7rem]">Giỏ hàng của bạn</h1>
+          <h1 className="text-3xl font-black tracking-tight text-slate-950 md:text-[2.7rem]">Giỏ hàng</h1>
           <p className="text-sm font-medium text-slate-600 md:text-base">
             {cartItems.length} sản phẩm trong giỏ
             {selectedIds.size > 0 && selectedIds.size < cartItems.length && (
@@ -379,7 +426,7 @@ const Cart = () => {
                         </button>
                       </div>
 
-                      {/* Ảnh */}
+                      {/* áº¢nh */}
                       <div className="relative">
                         <img
                           src={item.img || item.image_url || '/placeholder.png'}
@@ -530,14 +577,14 @@ const Cart = () => {
                         className="flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:text-emerald-800"
                       >
                         <Plus size={16} />
-                        {profiles.length === 0 ? 'Thêm địa chỉ giao hàng' : 'Thêm địa chỉ mới'}
+                        {profiles.length === 0 ? 'Thêm địa chỉ giao' : 'Thêm địa chỉ mới'}
                       </button>
                     )}
 
                     {/* Form tạo địa chỉ mới */}
                     {showNewProfileForm && (
                       <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                        <p className="mb-4 text-sm font-bold text-slate-800">Thêm địa chỉ giao hàng mới</p>
+                        <p className="mb-4 text-sm font-bold text-slate-800">Thêm địa chỉ mới</p>
                         {newProfileErrors.global && (
                           <p className="mb-3 text-sm font-semibold text-rose-600">{newProfileErrors.global}</p>
                         )}
@@ -645,7 +692,7 @@ const Cart = () => {
                   onSelect={setPaymentMethod}
                   icon={Truck}
                   label="Tiền mặt khi nhận hàng (COD)"
-                  description="Thanh toán trực tiếp khi nhận hàng, không cần thẻ hay tài khoản"
+                  description="Thanh toán khi nhận hàng"
                 />
                 <PaymentMethodCard
                   value="qr"
@@ -653,27 +700,36 @@ const Cart = () => {
                   onSelect={setPaymentMethod}
                   icon={QrCode}
                   label="Thanh toán QR Code"
-                  description="Quét mã QR qua app ngân hàng hoặc ví điện tử"
+                  description="Quét mã bằng app ngân hàng hoặc ví"
                 />
 
                 {paymentMethod === 'qr' && (
-                  <div className="mt-2 flex flex-col items-center gap-4 rounded-xl border border-emerald-200 bg-emerald-50 p-5 sm:flex-row sm:items-start">
-                    <img
-                      src={QR_IMAGE_URL}
+                  <div className="mt-2 grid gap-5 rounded-[26px] border border-emerald-200 bg-[linear-gradient(135deg,rgba(236,253,245,0.95),rgba(255,255,255,0.98))] p-5 sm:p-6 lg:grid-cols-[minmax(0,18rem)_1fr] lg:items-center">
+                    <div className="flex justify-center">
+                      {paymentQr?.image_url && !paymentQrImageError && (
+                        <img
+                          src={paymentQr.image_url}
                       alt="Mã QR thanh toán"
-                      className="h-40 w-40 shrink-0 rounded-xl border border-emerald-200 bg-white object-contain p-1 shadow"
-                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                    />
+                          className="h-56 w-56 max-w-full shrink-0 rounded-[24px] border border-emerald-200 bg-white object-contain p-2 shadow-[0_18px_36px_rgba(5,150,105,0.12)] md:h-72 md:w-72"
+                          onError={() => setPaymentQrImageError(true)}
+                        />
+                      )}
+                      {(!paymentQr?.image_url || paymentQrImageError) && (
+                        <div className="flex h-56 w-56 max-w-full items-center justify-center rounded-[24px] border border-dashed border-emerald-300 bg-white px-6 text-center text-sm font-semibold text-slate-500 md:h-72 md:w-72">
+                          {paymentQrLoading ? 'Dang tai ma QR...' : 'Chua co ma QR thanh toan'}
+                        </div>
+                      )}
+                    </div>
                     <div className="text-center sm:text-left">
                       <p className="font-bold text-emerald-800">Quét mã để thanh toán</p>
                       <p className="mt-1 text-sm text-slate-600">
-                        Mở app ngân hàng hoặc ví điện tử (MoMo, ZaloPay…) và quét mã QR bên cạnh.
+                        Mở app ngân hàng hoặc ví điện tử rồi quét mã bên cạnh.
                       </p>
                       <p className="mt-2 text-sm font-semibold text-slate-700">
                         Số tiền: <span className="text-emerald-700">{finalTotal.toLocaleString('vi-VN')}đ</span>
                       </p>
                       <p className="mt-1 text-xs text-slate-500">
-                        Nội dung: <span className="font-semibold text-slate-700">Thanh toan don hang</span>
+                        Nội dung: <span className="font-semibold text-slate-700">Thanh toán đơn hàng</span>
                       </p>
                     </div>
                   </div>
@@ -690,7 +746,7 @@ const Cart = () => {
               {/* Ghi chú chọn lọc */}
               {selectedIds.size < cartItems.length && selectedIds.size > 0 && (
                 <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 ring-1 ring-amber-200">
-                  Tính theo {selectedIds.size} sản phẩm đã chọn. {cartItems.length - selectedIds.size} sản phẩm còn lại vẫn ở trong giỏ sau khi đặt.
+                  Đơn này chỉ tính {selectedIds.size} sản phẩm đã chọn. Phần còn lại vẫn ở trong giỏ.
                 </p>
               )}
 
@@ -698,6 +754,10 @@ const Cart = () => {
                 <div className="flex items-center justify-between text-sm text-slate-700">
                   <span className="font-semibold">Tạm tính ({selectedIds.size} sản phẩm)</span>
                   <span className="font-semibold">{subtotal.toLocaleString('vi-VN')}đ</span>
+                </div>
+                <div className="flex items-center justify-between text-sm text-slate-700">
+                  <span className="font-semibold">Thuế VAT (10%)</span>
+                  <span className="font-semibold">{taxAmount.toLocaleString('vi-VN')}đ</span>
                 </div>
                 <div className="flex items-center justify-between text-sm text-slate-700">
                   <span className="inline-flex items-center gap-2 font-semibold">
@@ -714,8 +774,94 @@ const Cart = () => {
                 </div>
                 {shippingFee > 0 && selectedItems.length > 0 && (
                   <p className="rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                    Đơn từ 500.000đ được miễn phí ship.
+                    Miễn phí ship cho đơn từ 500.000đ.
                   </p>
+                )}
+                <div className="rounded-[22px] border border-emerald-100 bg-[linear-gradient(180deg,rgba(240,253,244,0.96),rgba(255,255,255,0.98))] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-700">Ưu đãi của bạn</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-700">
+                        Bạn có {Number(user?.loyalty_points || 0).toLocaleString('vi-VN')} điểm, dùng tối đa theo giá trị đơn.
+                      </p>
+                    </div>
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-[0_12px_28px_rgba(5,150,105,0.22)]">
+                      <Gift size={18} />
+                    </div>
+                  </div>
+
+                  <div className="mt-4 space-y-4">
+                    <label className="block">
+                      <span className="text-sm font-bold text-slate-800">Chọn voucher</span>
+                      <select
+                        value={selectedVoucherCode}
+                        onChange={(event) => setSelectedVoucherCode(event.target.value)}
+                        disabled={loadingVouchers || vouchers.length === 0}
+                        className="mt-2 w-full rounded-2xl border border-emerald-100 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-50"
+                      >
+                        <option value="">Không dùng voucher</option>
+                        {vouchers.map((voucher) => (
+                          <option key={voucher.code} value={voucher.code}>
+                            {voucher.title} · Giảm {Number(voucher.discount_percent || 0)}%
+                          </option>
+                        ))}
+                      </select>
+                      {loadingVouchers && (
+                        <p className="mt-2 text-xs text-slate-500">Đang tải voucher...</p>
+                      )}
+                      {!loadingVouchers && vouchers.length === 0 && (
+                        <p className="mt-2 text-xs text-slate-500">Hiện chưa có voucher khả dụng.</p>
+                      )}
+                      {selectedVoucher && (
+                        <p className="mt-2 text-xs font-semibold text-emerald-700">
+                          {selectedVoucher.title}, giảm {Number(selectedVoucher.discount_percent || 0)}%, hết hạn {formatDateTime(selectedVoucher.expires_at)}.
+                        </p>
+                      )}
+                    </label>
+
+                    <label className="block">
+                      <span className="text-sm font-bold text-slate-800">Dùng điểm thưởng</span>
+                      <div className="mt-2 flex gap-2">
+                        <input
+                          type="number"
+                          step="1"
+                          min="0"
+                          max={maxRedeemablePoints}
+                          value={normalizedPointsToRedeem}
+                          onChange={(event) => {
+                            const rawValue = Number(event.target.value || 0);
+                            setPointsToRedeem(Math.max(0, Math.floor(rawValue)));
+                          }}
+                          className="w-full rounded-2xl border border-emerald-100 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+                          placeholder="Nhập số điểm muốn dùng"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setPointsToRedeem(maxRedeemablePoints)}
+                          disabled={maxRedeemablePoints === 0}
+                          className="shrink-0 rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-sm font-bold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Dùng tối đa
+                        </button>
+                      </div>
+                      <p className="mt-2 text-xs text-slate-500">
+                        Có thể dùng tối đa {maxRedeemablePoints.toLocaleString('vi-VN')} điểm.
+                      </p>
+                    </label>
+                  </div>
+                </div>
+
+                {voucherDiscount > 0 && (
+                  <div className="flex items-center justify-between text-sm text-emerald-700">
+                    <span className="font-semibold">Giảm từ voucher</span>
+                    <span className="font-bold">-{voucherDiscount.toLocaleString('vi-VN')}đ</span>
+                  </div>
+                )}
+                {normalizedPointsToRedeem > 0 && (
+                  <div className="flex items-center justify-between text-sm text-emerald-700">
+                    <span className="font-semibold">Giảm từ điểm</span>
+                    <span className="font-bold">-{normalizedPointsToRedeem.toLocaleString('vi-VN')}đ</span>
+                  </div>
                 )}
                 <div className="flex items-center justify-between border-t border-slate-200 pt-4">
                   <span className="text-base font-black text-slate-900">Tổng cộng</span>
@@ -732,7 +878,11 @@ const Cart = () => {
                   </div>
                   <div className="flex items-center gap-2 text-xs text-slate-600">
                     <Wallet size={13} className="shrink-0 text-emerald-500" />
-                    <span>{paymentMethod === 'cod' ? 'Tiền mặt khi nhận (COD)' : 'Thanh toán QR Code'}</span>
+                    <span>
+                      {paymentMethod === 'cod'
+                        ? 'Tiền mặt khi nhận (COD)'
+                        : `Thanh toán QR Code${paymentQr?.provider_name ? ` - ${paymentQr.provider_name}` : ''}`}
+                    </span>
                   </div>
                 </div>
               )}
@@ -751,8 +901,8 @@ const Cart = () => {
                 {loading
                   ? 'Đang xử lý đơn hàng...'
                   : selectedIds.size < cartItems.length && selectedIds.size > 0
-                  ? `Đặt ${selectedIds.size} sản phẩm đã chọn`
-                  : 'Tiến hành đặt hàng'}
+                  ? `Đặt ${selectedIds.size} sản phẩm`
+                  : 'Đặt hàng'}
               </button>
 
               {selectedItems.length === 0 && (
@@ -767,7 +917,7 @@ const Cart = () => {
               )}
 
               <div className="mt-4 space-y-1 text-xs text-slate-500">
-                <p>Thanh toán an toàn và bảo mật.</p>
+                <p>Thanh toán an toàn.</p>
                 <p>Hỗ trợ 24/7: 1800-1234.</p>
               </div>
             </div>
@@ -779,3 +929,4 @@ const Cart = () => {
 };
 
 export default Cart;
+

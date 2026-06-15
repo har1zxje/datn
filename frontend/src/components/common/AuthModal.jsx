@@ -16,9 +16,9 @@ const AuthModal = ({ isOpen, onClose }) => {
       }
     : {
         title: 'Yêu cầu đăng nhập',
-        desc: 'Bạn cần đăng nhập để sử dụng tính năng này. Bạn có muốn đến trang đăng nhập không?',
+        desc: 'Bạn cần đăng nhập để dùng tính năng này. Chuyển đến trang đăng nhập?',
         later: 'Để sau',
-        now: 'Đăng nhập ngay',
+        now: 'Đăng nhập',
       };
 
   useEffect(() => {

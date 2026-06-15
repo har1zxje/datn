@@ -1,4 +1,4 @@
-import axios from 'axios';
+﻿import axios from 'axios';
 import { getNavigationSignal } from './navigationTasks';
 import { safeText } from '../utils/text';
 
@@ -44,14 +44,30 @@ export const clearAuthSession = ({ redirect = false, notify = false } = {}) => {
   localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
   if (notify) notifyAuthExpired();
-  if (redirect && window.location.pathname !== '/auth') {
-    window.location.assign('/auth');
+  if (redirect && window.location.pathname !== '/') {
+    window.location.assign('/');
   }
 };
 
-const isAdminSession = () => Boolean(getStoredUser()?.is_admin);
+export const isRequestCanceled = (error) => {
+  const detail = safeText(error?.detail).toLowerCase();
+  const message = safeText(error?.message).toLowerCase();
+  const code = safeText(error?.code).toUpperCase();
+
+  return Boolean(
+    error?.isCanceled ||
+    axios.isCancel?.(error) ||
+    code === 'ERR_CANCELED' ||
+    error?.name === 'CanceledError' ||
+    detail === 'canceled' ||
+    message === 'canceled'
+  );
+};
 
 const apiError = (error, fallback) => {
+  if (isRequestCanceled(error)) {
+    return { detail: 'canceled', code: 'ERR_CANCELED', isCanceled: true };
+  }
   if (error?.detail) return error;
   if (error?.response?.data) return error.response.data;
   if (error?.message) return { detail: error.message };
@@ -124,6 +140,22 @@ const resolveImageUrl = (rawValue) => {
   return `${API_BASE_URL}/${value}`;
 };
 
+const appendVersionQuery = (url, version) => {
+  const normalizedUrl = safeText(url);
+  const normalizedVersion = safeText(version);
+  if (!normalizedUrl || !normalizedVersion) return normalizedUrl;
+  const separator = normalizedUrl.includes('?') ? '&' : '?';
+  return `${normalizedUrl}${separator}v=${encodeURIComponent(normalizedVersion)}`;
+};
+
+const normalizePaymentQr = (payload = {}) => ({
+  ...payload,
+  image_url: appendVersionQuery(
+    resolveImageUrl(payload.image_url),
+    payload.updated_at || payload.id,
+  ),
+});
+
 const resolveDownloadFilename = (contentDisposition, fallback) => {
   const headerValue = safeText(contentDisposition);
   if (!headerValue) return fallback;
@@ -141,20 +173,55 @@ const resolveDownloadFilename = (contentDisposition, fallback) => {
   return plainMatch?.[1] || fallback;
 };
 
+const compactQueryParams = (params = {}) =>
+  Object.fromEntries(
+    Object.entries(params).filter(([, value]) => {
+      if (value === undefined || value === null) return false;
+      if (typeof value === 'string' && value.trim() === '') return false;
+      return true;
+    }),
+  );
+
 export const normalizeProduct = (product = {}) => {
-  const priceNumber = Number(product.discount_price ?? product.price ?? 0);
+  const basePrice = Number(product.price ?? 0);
+  const discountPrice = Number(product.discount_price ?? 0);
+  const hasDiscountPrice =
+    Number.isFinite(discountPrice) &&
+    discountPrice > 0 &&
+    Number.isFinite(basePrice) &&
+    basePrice > discountPrice;
+  const priceNumber = hasDiscountPrice ? discountPrice : basePrice;
   const resolvedCategoryId = product.category_id || product.category?.id || null;
   const categoryName = product.category?.name || product.category_name || product.category || '';
+  const resolvedSoldCount = Number(
+    product.sold_count ??
+      product.total_sold ??
+      product.units_sold ??
+      product.quantity_sold ??
+      product.sales_count ??
+      0
+  );
   const resolvedImageUrl =
     resolveImageUrl(product.image_url) ||
     resolveImageUrl(product.img) ||
     PLACEHOLDER_IMAGE;
+  const resolvedDiscountPercent = Number(
+    product.discount_percent ||
+      (hasDiscountPrice && basePrice > 0 ? ((basePrice - discountPrice) / basePrice) * 100 : 0)
+  );
 
   return {
     ...product,
     name: safeText(product.name),
     description: safeText(product.description),
     price: priceNumber,
+    base_price: basePrice,
+    original_price: hasDiscountPrice ? basePrice : 0,
+    discount_price: hasDiscountPrice ? discountPrice : 0,
+    discount_percent: Number.isFinite(resolvedDiscountPercent) ? resolvedDiscountPercent : 0,
+    promotion_type: safeText(product.promotion_type, 'none'),
+    promotion_value: Number(product.promotion_value || 0),
+    promotion_label: safeText(product.promotion_label),
     priceText: formatCurrency(priceNumber),
     img: resolvedImageUrl,
     image_url: resolvedImageUrl,
@@ -164,6 +231,8 @@ export const normalizeProduct = (product = {}) => {
     quantity: product.quantity ?? product.stock ?? 0,
     unit: product.unit || 'kg',
     stock_status: product.stock_status || ((product.quantity ?? product.stock ?? 0) > 0 ? 'in_stock' : 'out_of_stock'),
+    sold_count: Number.isFinite(resolvedSoldCount) ? resolvedSoldCount : 0,
+    is_featured: Boolean(product.is_featured),
     ai_supported: Boolean(product.ai_supported),
     ai_class_name: safeText(product.ai_class_name),
   };
@@ -175,8 +244,33 @@ export const normalizeCategory = (category = {}) => ({
   name: safeText(category.name || category.label, 'Danh mục'),
 });
 
+export const normalizeOrderStatusValue = (status) => {
+  const normalized = safeText(status)
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd');
+  const aliases = {
+    pending: 'pending',
+    'cho xac nhan': 'pending',
+    confirmed: 'confirmed',
+    'da xac nhan': 'confirmed',
+    shipped: 'shipped',
+    'dang giao': 'shipped',
+    delivered: 'delivered',
+    'da giao': 'delivered',
+    cancelled: 'cancelled',
+    canceled: 'cancelled',
+    'da huy': 'cancelled',
+    returned: 'returned',
+    'da tra': 'returned',
+  };
+  return aliases[normalized] || normalized;
+};
+
 export const normalizeOrderStatus = (status) => {
-  const normalized = String(status || '').trim().toLowerCase();
+  const normalized = normalizeOrderStatusValue(status);
   const labels = {
     pending: 'Chờ xác nhận',
     'cho xac nhan': 'Chờ xác nhận',
@@ -215,7 +309,7 @@ export const normalizeOrder = (order = {}) => {
 
   return {
     ...order,
-    status: order.status?.value || order.status,
+    status: normalizeOrderStatusValue(order.status?.value || order.status),
     subtotal: Number(order.subtotal || 0),
     tax: Number(order.tax || 0),
     shipping_fee: Number(order.shipping_fee || 0),
@@ -223,6 +317,8 @@ export const normalizeOrder = (order = {}) => {
     total: Number(order.total ?? order.total_price ?? 0),
     order_type: safeText(order.order_type, 'normal'),
     replacement_parent_order_id: order.replacement_parent_order_id ?? null,
+    voucher_code: safeText(order.voucher_code),
+    points_redeemed: Number(order.points_redeemed || 0),
     items: Array.isArray(order.items) ? order.items.map(normalizeOrderItem) : [],
     customerName: customerName || customerEmail || 'Ẩn danh',
     customerEmail,
@@ -234,6 +330,14 @@ export const normalizeOrder = (order = {}) => {
   };
 };
 
+const normalizeOrderStatusCounts = (counts = {}) =>
+  Object.entries(counts).reduce((acc, [status, count]) => {
+    const normalizedStatus = normalizeOrderStatusValue(status);
+    if (!normalizedStatus) return acc;
+    acc[normalizedStatus] = Number(acc[normalizedStatus] || 0) + Number(count || 0);
+    return acc;
+  }, {});
+
 const normalizeOrderListResponse = (payload = {}) => ({
   items: Array.isArray(payload.items) ? payload.items.map(normalizeOrder) : [],
   total: Number(payload.total || 0),
@@ -241,12 +345,28 @@ const normalizeOrderListResponse = (payload = {}) => ({
   limit: Number(payload.limit || 0),
   total_pages: Number(payload.total_pages || 1),
   has_next: Boolean(payload.has_next),
-  status_counts: payload.status_counts || {},
+  status_counts: normalizeOrderStatusCounts(payload.status_counts || {}),
 });
+
+const normalizeVoucher = (voucher = {}) => {
+  const rawTitle = safeText(voucher.title, 'Voucher tri an');
+  const title = rawTitle === 'Voucher tri an' ? 'Voucher tri ân' : rawTitle;
+  return {
+    code: safeText(voucher.code),
+    title,
+    reason: safeText(voucher.reason),
+    discount_percent: Number(voucher.discount_percent || 0),
+    discount_amount: Number(voucher.discount_amount || 0),
+    created_at: voucher.created_at || null,
+    expires_at: voucher.expires_at || null,
+    is_used: Boolean(voucher.is_used),
+    is_expired: Boolean(voucher.is_expired),
+  };
+};
 
 const normalizeNotification = (item = {}) => ({
   ...item,
-  title: safeText(item.title, 'Thong bao'),
+  title: safeText(item.title, 'Thông báo'),
   message: safeText(item.message),
   notification_type: safeText(item.notification_type, 'general'),
   is_read: Boolean(item.is_read),
@@ -256,8 +376,8 @@ const normalizeFreshnessReview = (item = {}) => ({
   ...item,
   image_url: resolveImageUrl(item.image_url),
   ai_label: safeText(item.ai_label),
-  customer_display_name: safeText(item.customer_display_name, 'Khach hang'),
-  customer_area: safeText(item.customer_area, 'Khu vuc khac'),
+  customer_display_name: safeText(item.customer_display_name, 'Khách hàng'),
+  customer_area: safeText(item.customer_area, 'Khu vực khác'),
 });
 
 const normalizeAdminFeedback = (item = {}) => ({
@@ -287,12 +407,20 @@ const normalizeAdminFeedback = (item = {}) => ({
 
 const normalizeAdminStats = (payload = {}) => ({
   ...payload,
+  last_7_days: Array.isArray(payload.last_7_days)
+    ? payload.last_7_days.map((item) => ({
+        date: item?.date || '',
+        label: safeText(item?.label, ''),
+        revenue: Number(item?.revenue || 0),
+        orders: Number(item?.orders || 0),
+      }))
+    : [],
   low_stock_items: Array.isArray(payload.low_stock_items)
     ? payload.low_stock_items.map((item) => ({
         ...item,
         image_url: resolveImageUrl(item.image_url),
-        name: safeText(item.name, 'San pham'),
-        category_name: safeText(item.category_name, 'Khac'),
+        name: safeText(item.name, 'Sản phẩm'),
+        category_name: safeText(item.category_name, 'Khác'),
       }))
     : [],
   recent_feedback: Array.isArray(payload.recent_feedback)
@@ -340,6 +468,16 @@ export const getProducts = async (params = {}) => {
     return products;
   } catch (error) {
     console.error('Product API error:', error);
+    return [];
+  }
+};
+
+export const getFeaturedProducts = async () => {
+  try {
+    const response = await api.get('/api/products/featured');
+    return Array.isArray(response.data) ? response.data.map(normalizeProduct) : [];
+  } catch (error) {
+    console.error('Featured product API error:', error);
     return [];
   }
 };
@@ -397,13 +535,19 @@ export const getAdminFeedbackEvents = async (params = {}) => {
       items: Array.isArray(response.data?.items) ? response.data.items.map(normalizeAdminFeedback) : [],
       total: Number(response.data?.total || 0),
       unread_count: Number(response.data?.unread_count || 0),
+      read_count: Number(response.data?.read_count || 0),
+      disputed_count: Number(response.data?.disputed_count || 0),
+      global_total: Number(response.data?.global_total || 0),
+      global_unread_count: Number(response.data?.global_unread_count || 0),
+      global_read_count: Number(response.data?.global_read_count || 0),
+      global_disputed_count: Number(response.data?.global_disputed_count || 0),
       page: Number(response.data?.page || 1),
       limit: Number(response.data?.limit || 12),
       total_pages: Number(response.data?.total_pages || 1),
       has_next: Boolean(response.data?.has_next),
     };
   } catch (error) {
-    throw apiError(error, 'Khong the tai danh sach AI feedback');
+    throw apiError(error, 'Không thể tải danh sách phản hồi AI');
   }
 };
 
@@ -412,7 +556,7 @@ export const markAdminFeedbackRead = async (feedbackId) => {
     const response = await api.put(`/api/admin/feedback-events/${feedbackId}/read`);
     return normalizeAdminFeedback(response.data);
   } catch (error) {
-    throw apiError(error, 'Khong the cap nhat trang thai feedback');
+    throw apiError(error, 'Không thể cập nhật trạng thái feedback');
   }
 };
 
@@ -478,7 +622,7 @@ export const getAdminUsersPage = async (params = {}) => {
       has_next: Boolean(response.data?.has_next),
     };
   } catch (error) {
-    throw apiError(error, 'Khong the tai danh sach nguoi dung');
+    throw apiError(error, 'Không thể tải danh sách người dùng');
   }
 };
 
@@ -505,7 +649,7 @@ export const getAdminOrdersPage = async (params = {}) => {
     const response = await api.get('/api/admin/orders/paginated', { params });
     return normalizeOrderListResponse(response.data);
   } catch (error) {
-    throw apiError(error, 'Loi tai danh sach don hang');
+    throw apiError(error, 'Lỗi tải danh sách đơn hàng');
   }
 };
 
@@ -535,7 +679,7 @@ export const bulkUpdateOrderStatus = async (orderIds, newStatus) => {
     });
     return response.data;
   } catch (error) {
-    throw apiError(error, 'Loi cap nhat trang thai hang loat');
+    throw apiError(error, 'Lỗi cập nhật trạng thái hàng loạt');
   }
 };
 
@@ -549,9 +693,6 @@ export const deleteOrder = async (orderId) => {
 };
 
 export const createOrder = async (orderData) => {
-  if (isAdminSession()) {
-    throw { detail: 'Tài khoản admin chỉ dùng để quản trị, không thể mua hoặc đặt hàng' };
-  }
   try {
     const response = await api.post('/api/orders', orderData);
     return normalizeOrder(response.data);
@@ -561,14 +702,20 @@ export const createOrder = async (orderData) => {
 };
 
 export const getUserOrders = async () => {
-  if (isAdminSession()) {
-    return [];
-  }
   try {
     const response = await api.get('/api/orders');
     return response.data.map(normalizeOrder);
   } catch (error) {
-    throw apiError(error, 'Loi lay danh sach don hang');
+    throw apiError(error, 'Lỗi lấy danh sách đơn hàng');
+  }
+};
+
+export const getUserOrdersPage = async (params = {}) => {
+  try {
+    const response = await api.get('/api/orders/paginated', { params });
+    return normalizeOrderListResponse(response.data);
+  } catch (error) {
+    throw apiError(error, 'Lỗi lấy danh sách đơn hàng');
   }
 };
 
@@ -577,7 +724,7 @@ export const getNotifications = async (params = {}) => {
     const response = await api.get('/api/notifications', { params });
     return Array.isArray(response.data) ? response.data.map(normalizeNotification) : [];
   } catch (error) {
-    throw apiError(error, 'Khong the tai thong bao');
+    throw apiError(error, 'Không thể tải thông báo');
   }
 };
 
@@ -586,7 +733,7 @@ export const markNotificationRead = async (notificationId) => {
     const response = await api.put(`/api/notifications/${notificationId}/read`);
     return normalizeNotification(response.data);
   } catch (error) {
-    throw apiError(error, 'Khong the cap nhat thong bao');
+    throw apiError(error, 'Không thể cập nhật thông báo');
   }
 };
 
@@ -602,7 +749,7 @@ export const getOrderFreshnessEligibility = async (orderId) => {
       already_confirmed: Boolean(response.data?.already_confirmed),
     };
   } catch (error) {
-    throw apiError(error, 'Khong the tai thong tin xac nhan do tuoi');
+    throw apiError(error, 'Không thể tải thông tin xác nhận độ tươi');
   }
 };
 
@@ -621,11 +768,108 @@ export const submitOrderFreshnessConfirmation = async (orderId, payload) => {
       ...response.data,
       awarded_points: Number(response.data?.awarded_points || 0),
       loyalty_points: Number(response.data?.loyalty_points || 0),
-      has_low_score_reviews: Boolean(response.data?.has_low_score_reviews),
+      all_predictions_correct: Boolean(response.data?.all_predictions_correct),
+      complaint_available: Boolean(response.data?.complaint_available),
+      thank_you_message: safeText(response.data?.thank_you_message),
+      voucher: response.data?.voucher ? normalizeVoucher(response.data.voucher) : null,
       reviews: Array.isArray(response.data?.reviews) ? response.data.reviews.map(normalizeFreshnessReview) : [],
     };
   } catch (error) {
-    throw apiError(error, 'Khong the gui xac nhan do tuoi');
+    throw apiError(error, 'Không thể gửi xác nhận độ tươi');
+  }
+};
+
+export const getAdminFreshnessVerificationReports = async (params = {}) => {
+  try {
+    const response = await api.get('/api/admin/freshness-verification-reports', {
+      params: compactQueryParams(params),
+    });
+    return {
+      items: Array.isArray(response.data?.items)
+        ? response.data.items.map((item) => ({
+            ...item,
+            image_url: resolveImageUrl(item.image_url),
+            confidence: Number(item.confidence || 0),
+            manual_note: safeText(item.manual_note),
+            reward_points: Number(item.reward_points || 0),
+            voucher_id: item.voucher_id ?? null,
+            voucher_code: safeText(item.voucher_code),
+            user: item.user
+              ? {
+                  ...item.user,
+                  username: safeText(item.user.username),
+                  full_name: safeText(item.user.full_name),
+                  email: safeText(item.user.email),
+                }
+              : null,
+          }))
+        : [],
+      total: Number(response.data?.total || 0),
+      page: Number(response.data?.page || 1),
+      limit: Number(response.data?.limit || 12),
+      total_pages: Number(response.data?.total_pages || 1),
+      has_next: Boolean(response.data?.has_next),
+    };
+  } catch (error) {
+    throw apiError(error, 'Không thể tải báo cáo xác minh độ tươi');
+  }
+};
+
+export const exportAdminFreshnessVerificationReportsExcel = async (params = {}) => {
+  try {
+    const response = await api.get('/api/admin/freshness-verification-reports/export-excel', {
+      params: compactQueryParams(params),
+      responseType: 'blob',
+    });
+    return {
+      blob: response.data,
+      filename: resolveDownloadFilename(
+        response.headers?.['content-disposition'],
+        `freshness-verification-reports-${new Date().toISOString().slice(0, 10)}.xlsx`,
+      ),
+    };
+  } catch (error) {
+    throw apiError(error, 'Không thể xuất Excel báo cáo xác minh độ tươi');
+  }
+};
+
+export const patchUserPoints = async (delta) => {
+  try {
+    const response = await api.patch('/api/user/points', { delta });
+    return {
+      ...response.data,
+      delta: Number(response.data?.delta || 0),
+      loyalty_points: Number(response.data?.loyalty_points || 0),
+    };
+  } catch (error) {
+    throw apiError(error, 'Không thể cập nhật điểm người dùng');
+  }
+};
+
+export const generateVoucher = async (payload) => {
+  try {
+    const response = await api.post('/api/vouchers/generate', payload);
+    return normalizeVoucher(response.data);
+  } catch (error) {
+    throw apiError(error, 'Không thể tạo voucher');
+  }
+};
+
+export const getMyVouchers = async () => {
+  try {
+    const response = await api.get('/api/vouchers/mine');
+    return Array.isArray(response.data) ? response.data.map(normalizeVoucher) : [];
+  } catch (error) {
+    throw apiError(error, 'Không thể tải danh sách voucher');
+  }
+};
+
+export const submitVerificationReport = async (payload) => {
+  try {
+    const response = await api.post('/api/admin/verification-report', payload);
+    return response.data;
+  } catch (error) {
+    throw apiError(error, 'Không thể gửi báo cáo xác minh');
   }
 };
 
@@ -634,7 +878,7 @@ export const createFreshnessComplaint = async (orderId, payload) => {
     const response = await api.post(`/api/orders/${orderId}/freshness-complaints`, payload);
     return response.data;
   } catch (error) {
-    throw apiError(error, 'Khong the tao yeu cau boi thuong');
+    throw apiError(error, 'Không thể tạo yêu cầu bồi thường');
   }
 };
 
@@ -647,14 +891,11 @@ export const getProductFreshnessReviews = async (productId) => {
       reviews: Array.isArray(response.data?.reviews) ? response.data.reviews.map(normalizeFreshnessReview) : [],
     };
   } catch (error) {
-    throw apiError(error, 'Khong the tai danh gia do tuoi');
+    throw apiError(error, 'Không thể tải đánh giá độ tươi');
   }
 };
 
 export const updateUserOrder = async (orderId, orderData) => {
-  if (isAdminSession()) {
-    throw { detail: 'Tài khoản admin không thể chỉnh sửa đơn hàng cá nhân' };
-  }
   try {
     const response = await api.put(`/api/orders/${orderId}`, orderData);
     return normalizeOrder(response.data);
@@ -664,9 +905,6 @@ export const updateUserOrder = async (orderId, orderData) => {
 };
 
 export const cancelUserOrder = async (orderId) => {
-  if (isAdminSession()) {
-    throw { detail: 'Tài khoản admin không thể hủy đơn hàng cá nhân' };
-  }
   try {
     const response = await api.post(`/api/orders/${orderId}/cancel`);
     return response.data;
@@ -714,7 +952,7 @@ export const getStockTransactionsPage = async (params = {}) => {
       has_next: Boolean(response.data?.has_next),
     };
   } catch (error) {
-    throw apiError(error, 'Khong the tai lich su giao dich kho');
+    throw apiError(error, 'Không thể tải lịch sử giao dịch kho');
   }
 };
 
@@ -747,7 +985,7 @@ export const exportStockTransactionsExcel = async (params = {}) => {
       ),
     };
   } catch (error) {
-    throw apiError(error, 'Khong the xuat file Excel giao dich kho');
+    throw apiError(error, 'Không thể xuất file Excel giao dịch kho');
   }
 };
 
@@ -758,7 +996,7 @@ export const importStockTransactionsExcel = async (excelFile) => {
     const response = await api.post('/api/admin/stock-transactions/import-excel', formData);
     return response.data;
   } catch (error) {
-    throw apiError(error, 'Khong the nhap file Excel giao dich kho');
+    throw apiError(error, 'Không thể nhập file Excel giao dịch kho');
   }
 };
 
@@ -766,12 +1004,19 @@ export const getAdminPaymentQRCode = async () => {
   try {
     const response = await api.get('/api/admin/payment-qr');
     if (!response.data) return null;
-    return {
-      ...response.data,
-      image_url: resolveImageUrl(response.data.image_url),
-    };
+    return normalizePaymentQr(response.data);
   } catch (error) {
-    throw apiError(error, 'Khong the tai ma QR thanh toan');
+    throw apiError(error, 'Không thể tải mã QR thanh toán');
+  }
+};
+
+export const getPaymentQRCode = async () => {
+  try {
+    const response = await api.get('/api/payment-qr');
+    if (!response.data) return null;
+    return normalizePaymentQr(response.data);
+  } catch (error) {
+    throw apiError(error, 'Không thể tải mã QR thanh toán');
   }
 };
 
@@ -781,12 +1026,9 @@ export const updateAdminPaymentQRCode = async ({ provider_name, image_file }) =>
     if (provider_name) formData.append('provider_name', provider_name);
     if (image_file instanceof File) formData.append('image_file', image_file);
     const response = await api.put('/api/admin/payment-qr', formData);
-    return {
-      ...response.data,
-      image_url: resolveImageUrl(response.data.image_url),
-    };
+    return normalizePaymentQr(response.data);
   } catch (error) {
-    throw apiError(error, 'Khong the cap nhat ma QR thanh toan');
+    throw apiError(error, 'Không thể cập nhật mã QR thanh toán');
   }
 };
 
@@ -851,7 +1093,7 @@ export const submitScannerFeedback = async (payload) => {
     const response = await api.post('/api/scans/feedback-events', payload);
     return response.data;
   } catch (error) {
-    throw apiError(error, 'Khong the gui feedback scanner');
+    throw apiError(error, 'Không thể gửi feedback scanner');
   }
 };
 
@@ -890,8 +1132,9 @@ export const quickAnalyzeScan = async ({
     const response = await api.post('/api/scans/quick-analyze', formData);
     return response.data;
   } catch (error) {
-    throw apiError(error, 'Khong the phan tich nhanh scanner');
+    throw apiError(error, 'Không thể phân tích nhanh scanner');
   }
 };
 
 export default api;
+

@@ -18,7 +18,6 @@ from utils.auth import (
     create_access_token,
     create_refresh_token,
     verify_token,
-    get_user_id_from_token,
     ACCESS_TOKEN_EXPIRE_MINUTES
 )
 from utils.email import generate_reset_token, send_password_reset_email
@@ -85,15 +84,24 @@ async def parse_refresh_token(request: Request) -> str:
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> models.User:
     """Get current authenticated user from token"""
-    user_id = get_user_id_from_token(token)
-    
-    if not user_id:
+    payload = verify_token(token, token_type="access")
+
+    if not payload or "sub" not in payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
+            detail="Token không hợp lệ hoặc đã hết hạn",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
+    try:
+        user_id = int(payload["sub"])
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token không hợp lệ hoặc đã hết hạn",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(
@@ -101,8 +109,72 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             detail="User not found",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
+    token_ver_in_jwt = payload.get("ver")
+    if token_ver_in_jwt is not None and int(token_ver_in_jwt) != int(user.token_version or 0):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token không hợp lệ hoặc đã hết hạn",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     return user
+
+
+def serialize_auth_user(user: models.User) -> dict:
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "full_name": user.full_name,
+        "is_admin": user.is_admin,
+        "is_staff": user.is_staff,
+        "role": user.role.value,
+        "loyalty_points": int(user.loyalty_points or 0),
+        "voucher_balance": user.voucher_balance,
+    }
+
+
+def serialize_user_profile(user: models.User) -> schemas.UserProfile:
+    return schemas.UserProfile(
+        id=user.id,
+        username=user.username,
+        email=user.email,
+        full_name=user.full_name,
+        role=user.role.value,
+        is_admin=user.is_admin,
+        is_staff=user.is_staff,
+        is_active=user.is_active,
+        avatar_url=user.avatar_url,
+        bio=user.bio,
+        address=user.address,
+        city=user.city,
+        phone=user.phone,
+        gender=user.gender,
+        date_of_birth=user.date_of_birth,
+        created_at=user.created_at,
+        last_login=user.last_login,
+        loyalty_points=int(user.loyalty_points or 0),
+        voucher_balance=user.voucher_balance,
+    )
+
+
+def apply_password_change(user: models.User, *, current_password: str, new_password: str) -> None:
+    """Require password re-authentication and rotate refresh sessions."""
+    if not verify_password(current_password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Mật khẩu hiện tại không đúng",
+        )
+
+    if verify_password(new_password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Mật khẩu mới phải khác mật khẩu hiện tại",
+        )
+
+    user.hashed_password = hash_password(new_password)
+    user.token_version = int(user.token_version or 0) + 1
 
 # ============ AUTH ENDPOINTS ============
 
@@ -130,7 +202,7 @@ def register(request: Request, user: schemas.UserRegister, db: Session = Depends
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User with this email or username already exists"
+            detail="Email hoặc tên đăng nhập đã tồn tại"
         )
     
     # Create new user
@@ -150,7 +222,7 @@ def register(request: Request, user: schemas.UserRegister, db: Session = Depends
     
     # [H1] Nhúng token_version vào refresh token
     token_ver = int(db_user.token_version or 0)
-    access_token = create_access_token({"sub": str(db_user.id)})
+    access_token = create_access_token({"sub": str(db_user.id), "ver": token_ver})
     refresh_token = create_refresh_token({"sub": str(db_user.id), "ver": token_ver})
 
     return {
@@ -158,14 +230,7 @@ def register(request: Request, user: schemas.UserRegister, db: Session = Depends
         "refresh_token": refresh_token,
         "token_type": "bearer",
         "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        "user": {
-            "id": db_user.id,
-            "username": db_user.username,
-            "email": db_user.email,
-            "full_name": db_user.full_name,
-            "is_admin": db_user.is_admin,
-            "role": db_user.role.value
-        }
+        "user": serialize_auth_user(db_user),
     }
 
 @router.post("/login", response_model=schemas.TokenData)
@@ -190,7 +255,7 @@ def login(
     if not credentials.email and not credentials.username:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email or username is required"
+            detail="Cần cung cấp Email hoặc tên đăng nhập"
         )
     
     # Find user by email or username
@@ -203,14 +268,14 @@ def login(
     if not db_user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username/email or password"
+            detail="Tên đăng nhập/Email hoặc mật khẩu không đúng"
         )
     
     # Verify password
     if not verify_password(credentials.password, db_user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username/email or password"
+            detail="Tên đăng nhập/Email hoặc mật khẩu không đúng"
         )
     
     db_user.last_login = datetime.datetime.utcnow()
@@ -218,7 +283,7 @@ def login(
 
     # [H1] Nhúng token_version để refresh token bị invalidate khi đổi mật khẩu
     token_ver = int(db_user.token_version or 0)
-    access_token = create_access_token({"sub": str(db_user.id)})
+    access_token = create_access_token({"sub": str(db_user.id), "ver": token_ver})
     refresh_token = create_refresh_token({"sub": str(db_user.id), "ver": token_ver})
     
     return {
@@ -226,14 +291,7 @@ def login(
         "refresh_token": refresh_token,
         "token_type": "bearer",
         "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,  # seconds
-        "user": {
-            "id": db_user.id,
-            "username": db_user.username,
-            "email": db_user.email,
-            "full_name": db_user.full_name,
-            "is_admin": db_user.is_admin,
-            "role": db_user.role.value
-        }
+        "user": serialize_auth_user(db_user),
     }
 
 @router.post("/refresh", response_model=schemas.TokenData)
@@ -255,7 +313,7 @@ async def refresh_token_endpoint(
     if not payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired refresh token"
+            detail="Refresh token không hợp lệ hoặc đã hết hạn"
         )
 
     user_id = int(payload.get("sub"))
@@ -264,7 +322,7 @@ async def refresh_token_endpoint(
     if not db_user or not db_user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found or inactive"
+            detail="Không tìm thấy người dùng hoặc tài khoản đã bị vô hiệu hóa"
         )
 
     # [H1] Kiểm tra token_version — nếu không khớp thì token đã bị revoke
@@ -273,11 +331,11 @@ async def refresh_token_endpoint(
     if token_ver_in_jwt is not None and int(token_ver_in_jwt) != current_ver:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token da het hieu luc do doi mat khau. Vui long dang nhap lai."
+            detail="Token đã hết hiệu lực do đổi mật khẩu. Vui lòng đăng nhập lại."
         )
 
     # Phát hành token mới với version hiện tại
-    access_token = create_access_token({"sub": str(user_id)})
+    access_token = create_access_token({"sub": str(user_id), "ver": current_ver})
     new_refresh_token = create_refresh_token({"sub": str(user_id), "ver": current_ver})
     
     return {
@@ -285,14 +343,7 @@ async def refresh_token_endpoint(
         "refresh_token": new_refresh_token,
         "token_type": "bearer",
         "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,  # seconds
-        "user": {
-            "id": db_user.id,
-            "username": db_user.username,
-            "email": db_user.email,
-            "full_name": db_user.full_name,
-            "is_admin": db_user.is_admin,
-            "role": db_user.role.value
-        }
+        "user": serialize_auth_user(db_user),
     }
 
 
@@ -317,7 +368,7 @@ def forgot_password(
 
     return {
         "success": True,
-        "message": "Neu email ton tai, lien ket dat lai mat khau da duoc gui.",
+        "message": "Nếu Email tồn tại, liên kết đặt lại mật khẩu đã được gửi.",
     }
 
 
@@ -337,7 +388,7 @@ def reset_password(
     if not user or not user.password_reset_expires_at:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Token khong hop le hoac da het han",
+            detail="Token không hợp lệ hoặc đã hết hạn",
         )
 
     if datetime.datetime.utcnow() > user.password_reset_expires_at:
@@ -347,7 +398,7 @@ def reset_password(
         db.commit()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Token da het han. Vui long yeu cau dat lai mat khau moi.",
+            detail="Token đã hết hạn. Vui lòng yêu cầu đặt lại mật khẩu mới.",
         )
 
     user.hashed_password = hash_password(payload.new_password)
@@ -355,9 +406,11 @@ def reset_password(
     user.password_reset_token = None
     user.password_reset_expires_at = None
     user.updated_at = datetime.datetime.utcnow()
+    # [H1] Tăng token_version → tất cả refresh token cũ bị invalidate ngay lập tức
+    user.token_version = int(user.token_version or 0) + 1
     db.commit()
 
-    return {"success": True, "message": "Dat lai mat khau thanh cong. Vui long dang nhap lai."}
+    return {"success": True, "message": "Đặt lại mật khẩu thành công. Vui lòng đăng nhập lại."}
 
 
 @router.post("/change-password")
@@ -366,27 +419,18 @@ def change_password(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if not verify_password(payload.current_password, current_user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Mat khau hien tai khong dung",
-        )
-
-    if payload.current_password == payload.new_password:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Mat khau moi phai khac mat khau hien tai",
-        )
-
-    current_user.hashed_password = hash_password(payload.new_password)
+    apply_password_change(
+        current_user,
+        current_password=payload.current_password,
+        new_password=payload.new_password,
+    )
     current_user.updated_at = datetime.datetime.utcnow()
     # [H1] Tăng token_version → tất cả refresh token cũ bị invalidate ngay lập tức
-    current_user.token_version = int(current_user.token_version or 0) + 1
     db.commit()
 
     return {
         "success": True,
-        "message": "Doi mat khau thanh cong. Vui long dang nhap lai tren tat ca thiet bi.",
+        "message": "Đổi mật khẩu thành công. Vui lòng đăng nhập lại trên tất cả thiết bị.",
     }
 
 @router.get("/me", response_model=schemas.UserProfile)
@@ -396,24 +440,7 @@ def get_current_user_info(current_user: models.User = Depends(get_current_user))
     
     **Response:** User profile with all details
     """
-    return schemas.UserProfile(
-        id=current_user.id,
-        username=current_user.username,
-        email=current_user.email,
-        full_name=current_user.full_name,
-        role=current_user.role.value,
-        is_admin=current_user.is_admin,
-        is_active=current_user.is_active,
-        avatar_url=current_user.avatar_url,
-        bio=current_user.bio,
-        address=current_user.address,
-        city=current_user.city,
-        phone=current_user.phone,
-        gender=current_user.gender,
-        date_of_birth=current_user.date_of_birth,
-        created_at=current_user.created_at,
-        last_login=current_user.last_login
-    )
+    return serialize_user_profile(current_user)
 
 @router.put("/me", response_model=schemas.UserProfile)
 def update_current_user(
@@ -432,7 +459,16 @@ def update_current_user(
     if user_update.full_name is not None:
         current_user.full_name = user_update.full_name
     if user_update.password is not None:
-        current_user.hashed_password = hash_password(user_update.password)
+        if user_update.current_password is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cần nhập mật khẩu hiện tại khi đổi mật khẩu",
+            )
+        apply_password_change(
+            current_user,
+            current_password=user_update.current_password,
+            new_password=user_update.password,
+        )
     if user_update.phone is not None:
         current_user.phone = user_update.phone
     if user_update.avatar_url is not None:
@@ -455,24 +491,7 @@ def update_current_user(
     db.commit()
     db.refresh(current_user)
     
-    return schemas.UserProfile(
-        id=current_user.id,
-        username=current_user.username,
-        email=current_user.email,
-        full_name=current_user.full_name,
-        role=current_user.role.value,
-        is_admin=current_user.is_admin,
-        is_active=current_user.is_active,
-        avatar_url=current_user.avatar_url,
-        bio=current_user.bio,
-        address=current_user.address,
-        city=current_user.city,
-        phone=current_user.phone,
-        gender=current_user.gender,
-        date_of_birth=current_user.date_of_birth,
-        created_at=current_user.created_at,
-        last_login=current_user.last_login
-    )
+    return serialize_user_profile(current_user)
 
 @router.post("/logout")
 def logout(current_user: models.User = Depends(get_current_user)):
