@@ -10,6 +10,8 @@ const MarketCategorySidebar = ({
   onSelectKeyword,
   categories = [],
   compact = false,
+  sticky = true,
+  className = '',
 }) => {
   const { language } = useAppSettings();
   const [expandedCategoryId, setExpandedCategoryId] = useState('');
@@ -68,8 +70,16 @@ const MarketCategorySidebar = ({
     );
   }
 
+  const sidebarClassName = [
+    'market-category-sidebar hidden h-fit self-start max-h-[calc(100vh-3rem)] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-[0_16px_38px_rgba(15,23,42,0.08)] lg:block',
+    sticky ? 'sticky top-6' : '',
+    className,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
-    <aside className="market-category-sidebar sticky top-28 hidden max-h-[calc(100vh-7.5rem)] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-[0_16px_38px_rgba(15,23,42,0.08)] lg:block">
+    <aside className={sidebarClassName}>
       <div className="flex items-center gap-2 border-b border-slate-200 bg-emerald-600 px-6 py-5 text-white">
         <Package size={20} />
         <h2 className="font-category-label text-base font-bold">Danh mục sản phẩm</h2>

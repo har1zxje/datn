@@ -181,6 +181,44 @@ def test_order_flow_records_stock_movements():
         assert order_number in (import_tx.note or "")
 
 
+def test_products_api_returns_realtime_sold_count_from_orders():
+    token = _create_and_login_user(_make_unique("customer"), "123456")
+    product = _create_product(quantity=6)
+
+    create_response = client.post(
+        "/api/orders",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "items": [{"product_id": product.id, "quantity": 3}],
+            "shipping_address": "456 Test Street",
+            "shipping_city": "Ho Chi Minh City",
+            "shipping_phone": "0900000001",
+            "payment_method": "cod",
+        },
+    )
+    assert create_response.status_code == 200
+    order_id = create_response.json()["id"]
+
+    product_list_response = client.get("/api/products")
+    assert product_list_response.status_code == 200
+    listed_product = next(item for item in product_list_response.json() if item["id"] == product.id)
+    assert listed_product["sold_count"] == 3
+
+    product_detail_response = client.get(f"/api/products/{product.id}")
+    assert product_detail_response.status_code == 200
+    assert product_detail_response.json()["sold_count"] == 3
+
+    cancel_response = client.post(
+        f"/api/orders/{order_id}/cancel",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert cancel_response.status_code == 200
+
+    refreshed_product_detail = client.get(f"/api/products/{product.id}")
+    assert refreshed_product_detail.status_code == 200
+    assert refreshed_product_detail.json()["sold_count"] == 0
+
+
 def test_stock_transactions_excel_import_and_export():
     if importlib.util.find_spec("openpyxl") is None:
         pytest.skip("openpyxl is not installed in this environment")

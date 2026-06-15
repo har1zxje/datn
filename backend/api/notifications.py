@@ -51,7 +51,7 @@ def mark_notification_as_read(
     if not notification:
         from fastapi import HTTPException
 
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Thong bao khong ton tai")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Thông báo không tồn tại")
 
     if not notification.is_read:
         notification.is_read = True

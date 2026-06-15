@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ChevronRight, ShoppingBasket } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import ProductCardGrid from '../components/common/ProductCardGrid';
 import NutriHeaderHero from '../components/home/NutriHeaderHero';
 import ProductDetail from '../components/ProductDetail';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import { useAppSettings } from '../context/AppSettingsContext';
-import { getProducts } from '../services/api';
+import { getFeaturedProducts, getProducts } from '../services/api';
 import { getPromotionBadge } from '../data/marketNavigation';
 import { uiLayout } from '../styles/uiTokens';
 
@@ -92,32 +92,50 @@ const Home = () => {
   const { addToCart, canUseCart } = useCart();
   const { t } = useAppSettings();
   const [products, setProducts] = useState([]);
+  const [featuredProducts, setFeaturedProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [addedToCart, setAddedToCart] = useState(null);
   const [selectedProductDetail, setSelectedProductDetail] = useState(null);
 
   useEffect(() => {
     let isMounted = true;
+
     const loadProducts = async () => {
       try {
-        const data = await getProducts();
-        if (isMounted) setProducts(data.length ? data : fallbackProducts);
+        const [productData, featuredData] = await Promise.all([getProducts(), getFeaturedProducts()]);
+        if (!isMounted) return;
+        setProducts(productData.length ? productData : fallbackProducts);
+        setFeaturedProducts(featuredData);
       } catch {
-        if (isMounted) setProducts(fallbackProducts);
+        if (!isMounted) return;
+        setProducts(fallbackProducts);
+        setFeaturedProducts([]);
       } finally {
         if (isMounted) setLoading(false);
       }
     };
+
     loadProducts();
-    return () => { isMounted = false; };
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const displayProducts = products.length ? products : fallbackProducts;
-  const campaignProducts = useMemo(() => displayProducts.slice(0, 8), [displayProducts]);
+
+  const featuredShowcaseProducts = useMemo(
+    () => featuredProducts.slice(0, 5),
+    [featuredProducts],
+  );
+
+  const featuredButtonCls =
+    'inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-white px-5 py-3 text-sm font-black text-emerald-700 transition hover:bg-emerald-50';
+
   const freshProducts = useMemo(() => {
-    const source = displayProducts.slice(4, 12);
+    const featuredIds = new Set(featuredShowcaseProducts.map((product) => product.id));
+    const source = displayProducts.filter((product) => !featuredIds.has(product.id)).slice(5, 13);
     return source.length >= 4 ? source : displayProducts.slice(0, 8);
-  }, [displayProducts]);
+  }, [displayProducts, featuredShowcaseProducts]);
 
   const goSearch = (keyword) => {
     navigate(`/shop?q=${encodeURIComponent(keyword)}`);
@@ -155,58 +173,46 @@ const Home = () => {
             onOpenShop={() => navigate('/shop')}
           />
 
-          {/* Chương trình nổi bật */}
-          <section className="rounded-[30px] border border-amber-200/70 bg-[linear-gradient(180deg,rgba(253,248,230,0.95),rgba(255,255,255,0.96))] p-6 shadow-[0_20px_44px_rgba(217,169,52,0.14)] md:p-8 lg:p-9">
-            <div className="mb-7 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="mb-2 text-[11px] font-black uppercase tracking-[0.16em] text-amber-700">{t('home_highlight')}</p>
-                <h2 className="text-xl font-black text-slate-950">{t('home_week_green')}</h2>
-                <p className="mt-2 max-w-2xl text-sm text-slate-600">
-                  Goi y nhom san pham duoc mua nhieu trong ngay, giu cue khuyen mai nhung uu tien kha nang quet nhanh va ra quyet dinh.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => goSearch('mua 2 tặng 1')}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-black text-white shadow-[0_16px_30px_rgba(15,23,42,0.18)] transition-all hover:bg-slate-800"
-              >
-                {t('home_see_all')}
-                <ChevronRight size={16} />
-              </button>
-            </div>
+          {loading || featuredShowcaseProducts.length > 0 ? (
+            <section className="overflow-hidden rounded-[32px] border border-emerald-200/80 bg-[linear-gradient(135deg,rgba(241,251,245,0.96),rgba(255,255,255,0.98)_58%,rgba(233,246,238,0.96))] p-6 shadow-[0_22px_48px_rgba(22,101,52,0.10)] md:p-8 lg:p-9">
+              <div className="mb-7 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div className="max-w-2xl">
+                  <h2 className="text-xl font-black text-slate-950 md:text-[1.7rem]">Sản phẩm đang nổi bật</h2>
+                </div>
 
-            {loading ? (
-              <div className="rounded-xl bg-white p-9 text-center text-sm font-semibold text-slate-500">
-                {t('common_loading_products')}
+                <div className="flex flex-wrap items-center gap-3">
+                  <Link to="/shop" className={featuredButtonCls}>
+                    {t('home_enter_shop')}
+                    <ChevronRight size={16} />
+                  </Link>
+                </div>
               </div>
-            ) : (
-              <ProductCardGrid
-                products={campaignProducts}
-                getBadge={(product, index) => getPromotionBadge(product, index)}
-                addedProductId={addedToCart}
-                onAddToCart={handleAddToCart}
-                onOpenDetail={openProductDetail}
-                disableAddToCart={!canUseCart}
-              />
-            )}
-          </section>
 
-          {/* Lựa chọn tươi mới */}
+              {loading ? (
+                <div className="rounded-[24px] border border-white/80 bg-white/85 p-9 text-center text-sm font-semibold text-slate-500">
+                  {t('common_loading_products')}
+                </div>
+              ) : (
+                <ProductCardGrid
+                  products={featuredShowcaseProducts}
+                  getBadge={(product, index) => getPromotionBadge(product, index)}
+                  addedProductId={addedToCart}
+                  onAddToCart={handleAddToCart}
+                  onOpenDetail={openProductDetail}
+                  disableAddToCart={!canUseCart}
+                />
+              )}
+            </section>
+          ) : null}
+
           <section className={`${uiLayout.sectionCard} bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(242,248,243,0.9))]`}>
             <div className="mb-7 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-[11px] font-black uppercase tracking-[0.16em] text-emerald-700">{t('home_fresh_choices')}</p>
                 <h2 className="text-xl font-black text-slate-950">{t('home_family_meals')}</h2>
-                <p className="mt-2 max-w-2xl text-sm text-slate-600">
-                  Lua chon de dua vao bua an hang ngay, du lieu that va thao tac mua nhanh duoc dat cung mot nhom.
-                </p>
               </div>
-              <Link
-                to="/shop"
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-white px-5 py-3 text-sm font-black text-emerald-700 transition-all hover:bg-emerald-50"
-              >
+              <Link to="/shop" className={featuredButtonCls}>
                 {t('home_enter_shop')}
-                <ShoppingBasket size={16} />
+                <ChevronRight size={16} />
               </Link>
             </div>
 

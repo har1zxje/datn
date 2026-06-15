@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Fragment, useEffect, useMemo, useState } from 'react';
 import {
   Calendar,
   ChevronLeft,
@@ -20,7 +20,9 @@ import {
   deleteOrder,
   getAdminOrdersPage,
   getOrderDetail,
+  isRequestCanceled,
   normalizeOrderStatus,
+  normalizeOrderStatusValue,
   updateOrderStatus,
 } from '../../services/api';
 import { safeText } from '../../utils/text';
@@ -53,41 +55,44 @@ const STATUS_THEMES = {
   pending: {
     badge: 'border-amber-200 bg-amber-50 text-amber-700',
     dot: 'bg-amber-500',
-    progress: 'bg-amber-500',
+    line: 'bg-amber-300',
   },
   confirmed: {
     badge: 'border-sky-200 bg-sky-50 text-sky-700',
     dot: 'bg-sky-500',
-    progress: 'bg-sky-500',
+    line: 'bg-sky-300',
   },
   shipped: {
     badge: 'border-indigo-200 bg-indigo-50 text-indigo-700',
     dot: 'bg-indigo-500',
-    progress: 'bg-indigo-500',
+    line: 'bg-indigo-300',
   },
   delivered: {
     badge: 'border-emerald-200 bg-emerald-50 text-emerald-700',
     dot: 'bg-emerald-500',
-    progress: 'bg-emerald-500',
+    line: 'bg-emerald-300',
   },
   cancelled: {
     badge: 'border-rose-200 bg-rose-50 text-rose-700',
     dot: 'bg-rose-500',
-    progress: 'bg-rose-500',
+    line: 'bg-rose-300',
   },
   returned: {
     badge: 'border-slate-200 bg-slate-100 text-slate-700',
     dot: 'bg-slate-500',
-    progress: 'bg-slate-500',
+    line: 'bg-slate-300',
   },
   default: {
     badge: 'border-slate-200 bg-slate-50 text-slate-700',
     dot: 'bg-slate-400',
-    progress: 'bg-slate-400',
+    line: 'bg-slate-200',
   },
 };
 
 const PROGRESS_STEPS = ['pending', 'confirmed', 'shipped', 'delivered'];
+
+const inputClass =
+  'w-full rounded-2xl border border-[color:var(--line-strong)] bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none shadow-[0_8px_24px_rgba(15,23,42,0.05)] transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100';
 
 const formatVndValue = (value) => Number(value || 0).toLocaleString('vi-VN');
 
@@ -95,12 +100,6 @@ const formatDateTime = (value) => {
   if (!value) return 'Chưa có';
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? 'Chưa có' : parsed.toLocaleString('vi-VN');
-};
-
-const formatDateOnly = (value) => {
-  if (!value) return 'Chưa có';
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? 'Chưa có' : parsed.toLocaleDateString('vi-VN');
 };
 
 const getPaymentLabel = (value) => {
@@ -113,48 +112,72 @@ const getPaymentLabel = (value) => {
   return labels[normalized] || safeText(value, 'Chưa rõ');
 };
 
-const getStatusTheme = (status) => STATUS_THEMES[status] || STATUS_THEMES.default;
+const getPaymentBadgeClass = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'cod') return 'border-amber-200 bg-amber-50 text-amber-700';
+  if (normalized === 'card') return 'border-sky-200 bg-sky-50 text-sky-700';
+  if (normalized === 'bank_transfer') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  return 'border-slate-200 bg-slate-50 text-slate-700';
+};
+
+const getStatusTheme = (status) => STATUS_THEMES[normalizeOrderStatusValue(status)] || STATUS_THEMES.default;
 
 const OrderStatusBadge = ({ status }) => {
-  const theme = getStatusTheme(status);
+  const normalizedStatus = normalizeOrderStatusValue(status);
+  const theme = getStatusTheme(normalizedStatus);
   return (
     <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${theme.badge}`}>
       <span className={`h-2 w-2 rounded-full ${theme.dot}`} />
-      {normalizeOrderStatus(status)}
+      {normalizeOrderStatus(normalizedStatus)}
     </span>
   );
 };
 
-const OrderStatusProgress = ({ status }) => {
-  const theme = getStatusTheme(status);
-  const activeIndex = PROGRESS_STEPS.indexOf(status);
-  const progressValue = status === 'cancelled'
-    ? 100
-    : activeIndex >= 0
-      ? (activeIndex / (PROGRESS_STEPS.length - 1)) * 100
-      : 0;
+const OrderStatusProgress = ({ status, compact = false }) => {
+  const normalizedStatus = normalizeOrderStatusValue(status);
+  const activeIndex = PROGRESS_STEPS.indexOf(normalizedStatus);
+  const isCancelled = normalizedStatus === 'cancelled';
+  const theme = getStatusTheme(normalizedStatus);
 
   return (
-    <div className="space-y-2">
-      <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-        <div
-          className={`h-full rounded-full transition-all ${status === 'cancelled' ? 'bg-rose-500' : theme.progress}`}
-          style={{ width: `${progressValue}%` }}
-        />
-      </div>
-      <div className="grid grid-cols-4 gap-2 text-[11px] font-semibold text-slate-400">
+    <div className={compact ? 'space-y-1' : 'space-y-2'}>
+      <div className="flex items-center gap-1.5">
         {PROGRESS_STEPS.map((step, index) => {
-          const reached = activeIndex >= index;
+          const reached = !isCancelled && activeIndex >= index;
+          const dotClass = isCancelled
+            ? index === 0
+              ? 'bg-rose-500'
+              : 'bg-slate-200'
+            : reached
+              ? theme.dot
+              : 'bg-slate-200';
+          const lineClass = isCancelled
+            ? 'bg-slate-200'
+            : activeIndex > index
+              ? theme.line
+              : 'bg-slate-200';
+
           return (
-            <span key={step} className={reached ? 'text-slate-700' : ''}>
-              {normalizeOrderStatus(step)}
-            </span>
+            <Fragment key={step}>
+              <span className={`h-2.5 w-2.5 rounded-full ${dotClass}`} />
+              {index < PROGRESS_STEPS.length - 1 ? <span className={`h-px flex-1 ${lineClass}`} /> : null}
+            </Fragment>
           );
         })}
       </div>
-      {status === 'cancelled' && (
-        <p className="text-xs font-semibold text-rose-600">Đơn hàng đã bị hủy.</p>
+      {!compact && (
+        <div className="grid grid-cols-4 gap-2 text-[11px] font-medium text-slate-400">
+          {PROGRESS_STEPS.map((step, index) => {
+            const reached = !isCancelled && activeIndex >= index;
+            return (
+              <span key={step} className={reached ? 'text-slate-700' : ''}>
+                {normalizeOrderStatus(step)}
+              </span>
+            );
+          })}
+        </div>
       )}
+      {isCancelled ? <p className="text-[11px] font-semibold text-rose-600">Đơn hàng đã bị hủy.</p> : null}
     </div>
   );
 };
@@ -171,6 +194,7 @@ const OrderManagementPanel = ({ active, refreshNonce, canDeleteOrders }) => {
   });
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [draftFilters, setDraftFilters] = useState(DEFAULT_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(true);
   const [selectedOrderIds, setSelectedOrderIds] = useState([]);
   const [bulkStatus, setBulkStatus] = useState('confirmed');
   const [loading, setLoading] = useState(false);
@@ -182,19 +206,23 @@ const OrderManagementPanel = ({ active, refreshNonce, canDeleteOrders }) => {
   const selectedOrderSet = useMemo(() => new Set(selectedOrderIds), [selectedOrderIds]);
   const visibleOrderIds = useMemo(() => orders.map((order) => order.id), [orders]);
   const allVisibleSelected = visibleOrderIds.length > 0 && visibleOrderIds.every((orderId) => selectedOrderSet.has(orderId));
-  const startItem = meta.total === 0 ? 0 : ((meta.page - 1) * meta.limit) + 1;
-  const endItem = meta.total === 0 ? 0 : startItem + orders.length - 1;
 
-  const orderSummaryCards = useMemo(() => ([
-    { key: 'all', label: 'Tất cả', value: meta.total },
-    ...ORDER_STATUSES.map(([value, label]) => ({
-      key: value,
-      label,
-      value: Number(meta.status_counts?.[value] || 0),
-    })),
-  ]), [meta.status_counts, meta.total]);
+  const orderSummaryTabs = useMemo(
+    () => [
+      { key: 'all', label: 'Tat ca', value: meta.total },
+      ...ORDER_STATUSES.map(([value, label]) => ({
+        key: value,
+        label,
+        value: Number(meta.status_counts?.[value] || 0),
+      })),
+    ],
+    [meta.status_counts, meta.total],
+  );
 
-  const resolveErrorMessage = (error, fallback) => safeText(error?.detail || error?.message, fallback);
+  const resolveErrorMessage = (error, fallback) => {
+    if (isRequestCanceled(error)) return '';
+    return safeText(error?.detail || error?.message, fallback);
+  };
 
   const loadOrders = async ({
     page = meta.page || 1,
@@ -361,179 +389,172 @@ const OrderManagementPanel = ({ active, refreshNonce, canDeleteOrders }) => {
   };
 
   return (
-    <section className="mt-8 space-y-6">
-      <div className="overflow-hidden rounded-[30px] border border-[color:var(--line-soft)] bg-white shadow-[var(--shadow-soft)]">
-        <div className="flex flex-col gap-4 border-b border-[color:var(--line-soft)] bg-[linear-gradient(135deg,rgba(15,154,98,0.12),rgba(216,169,52,0.10),rgba(255,255,255,0.96))] p-6 lg:flex-row lg:items-start lg:justify-between md:p-7">
-          <div>
-            <h2 className="text-lg font-bold tracking-tight text-slate-950">Quản lý đơn đặt hàng</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Tìm kiếm theo mã đơn hoặc khách hàng, lọc trạng thái và cập nhật nhiều đơn trong một lần thao tác.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => loadOrders()}
-            disabled={loading}
-            className="inline-flex items-center gap-2 rounded-2xl border border-[color:var(--line-strong)] bg-white px-4 py-3 text-sm font-bold text-slate-700 shadow-[0_8px_24px_rgba(15,23,42,0.05)] transition hover:bg-slate-50 disabled:opacity-60"
-          >
-            {loading ? <Loader2 className="animate-spin" size={16} /> : <RefreshCcw size={16} />}
-            Làm mới đơn hàng
-          </button>
-        </div>
-
-        {message && (
-          <div className={`mx-6 mt-5 rounded-2xl border px-4 py-3 text-sm font-semibold md:mx-7 ${
-            message.type === 'error'
-              ? 'border-rose-200 bg-rose-50 text-rose-700'
-              : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-          }`}>
-            {message.text}
-          </div>
-        )}
-
-        <div className="mt-6 grid gap-3 px-6 sm:grid-cols-2 md:px-7 xl:grid-cols-6">
-          {orderSummaryCards.map((item) => {
-            const isActive = filters.status === item.key || (item.key === 'all' && filters.status === 'all');
-            return (
-              <button
-                key={item.key}
-                type="button"
-                onClick={() => handleQuickStatusFilter(item.key)}
-                className={`rounded-[24px] border px-4 py-4 text-left transition ${
-                  isActive
-                    ? 'border-emerald-300 bg-emerald-50 shadow-[0_14px_30px_rgba(5,150,105,0.10)]'
-                    : 'border-[color:var(--line-soft)] bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)] hover:border-emerald-200 hover:bg-emerald-50/40'
-                }`}
-              >
-                <p className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">{item.label}</p>
-                <p className="mt-2 text-2xl font-black text-slate-950">{item.value}</p>
-              </button>
-            );
-          })}
-        </div>
-
-        <form onSubmit={handleApplyFilters} className="mx-6 mt-6 grid gap-4 rounded-[28px] border border-[color:var(--line-soft)] bg-slate-50/75 p-4 md:mx-7 md:grid-cols-2 xl:grid-cols-5">
-          <label className="space-y-1.5 xl:col-span-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Tìm kiếm</span>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-              <input
-                value={draftFilters.search}
-                onChange={(event) => setDraftFilters((prev) => ({ ...prev, search: event.target.value }))}
-                className="w-full rounded-2xl border border-[color:var(--line-strong)] bg-white py-3 pl-10 pr-4 text-sm font-semibold text-slate-900 outline-none shadow-[0_8px_24px_rgba(15,23,42,0.05)] transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-                placeholder="Mã đơn, tên khách hoặc username"
-              />
+    <section className="space-y-6 pb-24">
+      <div className="overflow-hidden rounded-[28px] border border-[color:var(--line-soft)] bg-white shadow-[var(--shadow-soft)]">
+        <div className="border-b border-[color:var(--line-soft)] px-5 py-5 md:px-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h2 className="text-xl font-black text-slate-950">Danh sách đơn hàng</h2>
             </div>
-          </label>
 
-          <label className="space-y-1.5">
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Trạng thái</span>
-            <select
-              value={draftFilters.status}
-              onChange={(event) => setDraftFilters((prev) => ({ ...prev, status: event.target.value }))}
-              className="w-full rounded-2xl border border-[color:var(--line-strong)] bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none shadow-[0_8px_24px_rgba(15,23,42,0.05)] transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-            >
-              <option value="all">Tất cả trạng thái</option>
-              {ORDER_STATUSES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
-          </label>
-
-          <label className="space-y-1.5">
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Thanh toán</span>
-            <select
-              value={draftFilters.payment_method}
-              onChange={(event) => setDraftFilters((prev) => ({ ...prev, payment_method: event.target.value }))}
-              className="w-full rounded-2xl border border-[color:var(--line-strong)] bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none shadow-[0_8px_24px_rgba(15,23,42,0.05)] transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-            >
-              {PAYMENT_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
-          </label>
-
-          <div className="grid gap-4 sm:grid-cols-2 xl:col-span-5 xl:grid-cols-[1fr_1fr_auto]">
-            <label className="space-y-1.5">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Từ ngày</span>
-              <div className="relative">
-                <Calendar className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                <input
-                  type="date"
-                  value={draftFilters.date_from}
-                  onChange={(event) => setDraftFilters((prev) => ({ ...prev, date_from: event.target.value }))}
-                  className="w-full rounded-2xl border border-[color:var(--line-strong)] bg-white py-3 pl-10 pr-4 text-sm font-semibold text-slate-900 outline-none shadow-[0_8px_24px_rgba(15,23,42,0.05)] transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-                />
-              </div>
-            </label>
-
-            <label className="space-y-1.5">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Đến ngày</span>
-              <div className="relative">
-                <Calendar className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                <input
-                  type="date"
-                  value={draftFilters.date_to}
-                  onChange={(event) => setDraftFilters((prev) => ({ ...prev, date_to: event.target.value }))}
-                  className="w-full rounded-2xl border border-[color:var(--line-strong)] bg-white py-3 pl-10 pr-4 text-sm font-semibold text-slate-900 outline-none shadow-[0_8px_24px_rgba(15,23,42,0.05)] transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-                />
-              </div>
-            </label>
-
-            <div className="flex items-end gap-3">
+            <div className="flex flex-wrap items-center gap-2">
               <button
-                type="submit"
-                disabled={loading}
-                className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white shadow-[0_14px_28px_rgba(5,150,105,0.22)] transition hover:bg-emerald-700 disabled:opacity-60"
+                type="button"
+                onClick={() => setFiltersOpen((prev) => !prev)}
+                className="inline-flex items-center gap-2 rounded-2xl border border-[color:var(--line-strong)] bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
               >
                 <Filter size={16} />
-                Áp dụng
+                {filtersOpen ? 'Ẩn lọc' : 'Lọc'}
               </button>
               <button
                 type="button"
-                onClick={handleResetFilters}
+                onClick={() => loadOrders()}
                 disabled={loading}
-                className="rounded-2xl border border-[color:var(--line-strong)] bg-white px-5 py-3 text-sm font-bold text-slate-700 shadow-[0_8px_24px_rgba(15,23,42,0.05)] transition hover:bg-slate-50 disabled:opacity-60"
+                className="inline-flex items-center gap-2 rounded-2xl border border-[color:var(--line-strong)] bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
               >
-                Đặt lại
+                {loading ? <Loader2 className="animate-spin" size={16} /> : <RefreshCcw size={16} />}
+                Làm mới
               </button>
             </div>
           </div>
-        </form>
+        </div>
 
-        <div className="mx-6 mt-6 flex flex-col gap-3 rounded-[28px] border border-[color:var(--line-soft)] bg-slate-950 px-4 py-4 text-white shadow-[0_18px_36px_rgba(15,23,42,0.14)] md:mx-7 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-sm font-semibold text-white">
-              Hiển thị {startItem}-{endItem} trên tổng {meta.total} đơn hàng
-            </p>
-            <p className="text-xs text-slate-300">Đang chọn {selectedOrderIds.length} đơn ở trang hiện tại.</p>
-          </div>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <select
-              value={bulkStatus}
-              onChange={(event) => setBulkStatus(event.target.value)}
-              className="rounded-2xl border border-white/15 bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-            >
-              {ORDER_STATUSES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
-            <button
-              type="button"
-              onClick={handleBulkStatusUpdate}
-              disabled={loading || selectedOrderIds.length === 0}
-              className="rounded-2xl bg-emerald-500 px-5 py-3 text-sm font-bold text-white shadow-[0_14px_28px_rgba(16,185,129,0.24)] transition hover:bg-emerald-400 disabled:opacity-60"
-            >
-              Cập nhật hàng loạt
-            </button>
+        <div className="overflow-x-auto px-4 pt-3 md:px-6">
+          <div className="flex min-w-max gap-5 border-b border-slate-200">
+            {orderSummaryTabs.map((item) => {
+              const isActive = filters.status === item.key || (item.key === 'all' && filters.status === 'all');
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => handleQuickStatusFilter(item.key)}
+                  className={`flex min-w-[112px] flex-col gap-1 border-b-[3px] px-1 pb-3 pt-1 text-left transition ${
+                    isActive
+                      ? 'border-emerald-600 text-slate-950'
+                      : 'border-transparent text-slate-500 hover:text-slate-900'
+                  }`}
+                >
+                  <span className="text-sm font-semibold">{item.label}</span>
+                  <span className="text-2xl font-semibold">{item.value}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
+
+        {filtersOpen ? (
+          <form
+            onSubmit={handleApplyFilters}
+            className="grid gap-4 px-5 py-5 md:px-6 xl:grid-cols-[minmax(0,2.2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.45fr)_auto_auto]"
+          >
+            <label className="space-y-2 xl:max-w-none">
+              <span className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Tìm kiếm</span>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                <input
+                  value={draftFilters.search}
+                  onChange={(event) => setDraftFilters((prev) => ({ ...prev, search: event.target.value }))}
+                  className={`${inputClass} pl-10`}
+                  placeholder="Mã đơn, tên khách hàng hoặc Email"
+                />
+              </div>
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Trạng thái</span>
+              <select
+                value={draftFilters.status}
+                onChange={(event) => setDraftFilters((prev) => ({ ...prev, status: event.target.value }))}
+                className={inputClass}
+              >
+                <option value="all">Tất cả trạng thái</option>
+                {ORDER_STATUSES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Thanh toán</span>
+              <select
+                value={draftFilters.payment_method}
+                onChange={(event) => setDraftFilters((prev) => ({ ...prev, payment_method: event.target.value }))}
+                className={inputClass}
+              >
+                {PAYMENT_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+
+            <div className="space-y-2">
+              <span className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Khoảng ngày</span>
+              <div className="overflow-hidden rounded-2xl border border-[color:var(--line-strong)] bg-white shadow-[0_8px_24px_rgba(15,23,42,0.05)]">
+                <div className="grid grid-cols-2 divide-x divide-slate-200">
+                  <div className="relative">
+                    <Calendar className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                    <input
+                      type="date"
+                      value={draftFilters.date_from}
+                      onChange={(event) => setDraftFilters((prev) => ({ ...prev, date_from: event.target.value }))}
+                      className="w-full border-0 bg-transparent py-3 pl-10 pr-3 text-sm font-semibold text-slate-900 outline-none"
+                    />
+                  </div>
+                  <div className="relative">
+                    <Calendar className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                    <input
+                      type="date"
+                      value={draftFilters.date_to}
+                      onChange={(event) => setDraftFilters((prev) => ({ ...prev, date_to: event.target.value }))}
+                      className="w-full border-0 bg-transparent py-3 pl-10 pr-3 text-sm font-semibold text-slate-900 outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="inline-flex items-center justify-center gap-2 self-end rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white shadow-[0_14px_28px_rgba(5,150,105,0.22)] transition hover:bg-emerald-700 disabled:opacity-60"
+            >
+              <Filter size={16} />
+              Áp dụng
+            </button>
+
+            <button
+              type="button"
+              onClick={handleResetFilters}
+              disabled={loading}
+              className="inline-flex items-center justify-center gap-2 self-end rounded-2xl border border-[color:var(--line-strong)] bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+            >
+              Đặt lại
+            </button>
+          </form>
+        ) : null}
       </div>
+
+      {message?.text ? (
+        <div className={`rounded-[24px] border px-4 py-3 text-sm font-semibold ${
+          message.type === 'error'
+            ? 'border-rose-200 bg-rose-50 text-rose-700'
+            : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+        }`}>
+          {message.text}
+        </div>
+      ) : null}
 
       <div className="space-y-4 md:hidden">
         {loading && orders.length === 0 ? (
-          <div className="rounded-[30px] border border-[color:var(--line-soft)] bg-white p-8 text-center text-sm text-slate-500 shadow-[var(--shadow-soft)]">
+          <div className="rounded-[28px] border border-[color:var(--line-soft)] bg-white p-8 text-center text-sm text-slate-500 shadow-[var(--shadow-soft)]">
             <Loader2 className="mx-auto animate-spin text-emerald-600" size={22} />
             <p className="mt-3">Đang tải danh sách đơn hàng...</p>
           </div>
         ) : null}
 
         {orders.map((order) => (
-          <article key={order.id} className={`rounded-[28px] border bg-white p-5 shadow-[0_10px_28px_rgba(15,23,42,0.05)] ${selectedOrderSet.has(order.id) ? 'border-emerald-300 bg-emerald-50/30' : 'border-[color:var(--line-soft)]'}`}>
+          <article
+            key={order.id}
+            className={`rounded-[24px] border bg-white p-4 shadow-[0_10px_28px_rgba(15,23,42,0.05)] ${
+              selectedOrderSet.has(order.id) ? 'border-emerald-300 bg-emerald-50/30' : 'border-[color:var(--line-soft)]'
+            }`}
+          >
             <div className="flex items-start gap-3">
               <input
                 type="checkbox"
@@ -542,49 +563,57 @@ const OrderManagementPanel = ({ active, refreshNonce, canDeleteOrders }) => {
                 className="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
               />
               <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-black text-slate-950">{order.order_number || `#${order.id}`}</p>
-                    <p className="text-xs text-slate-500">{formatDateTime(order.created_at)}</p>
+                    <p className="font-mono text-sm font-black text-slate-950">{order.order_number || `#${order.id}`}</p>
+                    <p className="mt-1 text-xs text-slate-500">{formatDateTime(order.created_at)}</p>
                   </div>
+                  <p className="text-right text-lg font-black text-emerald-700">{formatVndValue(order.total)} d</p>
+                </div>
+
+                <div className="mt-4 grid gap-3 rounded-[20px] bg-slate-50 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-slate-900">{order.customerName}</p>
+                      <p className="truncate text-sm text-slate-500">{order.customerEmail || 'Không có email'}</p>
+                    </div>
+                    <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${getPaymentBadgeClass(order.payment_method)}`}>
+                      {getPaymentLabel(order.payment_method)}
+                    </span>
+                  </div>
+
                   <OrderStatusBadge status={order.status} />
+                  <OrderStatusProgress status={order.status} compact />
                 </div>
-                <div className="mt-4 space-y-2 text-sm text-slate-600">
-                  <p className="font-semibold text-slate-900">{order.customerName}</p>
-                  <p>{order.customerEmail || 'Không có email'}</p>
-                  <p className="font-black text-emerald-700">{formatVndValue(order.total)} đ</p>
-                  <p>Thanh toán: {getPaymentLabel(order.payment_method)}</p>
-                </div>
-                <div className="mt-4">
-                  <OrderStatusProgress status={order.status} />
-                </div>
+
                 <div className="mt-4 space-y-3">
                   <select
                     value={order.status}
                     onChange={(event) => handleSingleStatusUpdate(order.id, event.target.value)}
                     disabled={loading}
-                    className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+                    className={inputClass}
                   >
                     {ORDER_STATUSES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </select>
+
                   <div className="flex gap-3">
                     <button
                       type="button"
                       onClick={() => openOrderDetail(order.id)}
-                      className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                      className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                     >
                       <Eye size={16} />
                       Chi tiết
                     </button>
-                    {canDeleteOrders && (
+                    {canDeleteOrders ? (
                       <button
                         type="button"
                         onClick={() => handleDeleteOrder(order.id)}
-                        className="inline-flex items-center justify-center rounded-xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white hover:bg-rose-700"
+                        className="inline-flex items-center justify-center rounded-2xl border border-rose-200 px-4 py-3 text-rose-600 hover:bg-rose-50"
                       >
                         <Trash2 size={16} />
                       </button>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -593,102 +622,107 @@ const OrderManagementPanel = ({ active, refreshNonce, canDeleteOrders }) => {
         ))}
       </div>
 
-      <div className="hidden overflow-hidden rounded-[30px] border border-[color:var(--line-soft)] bg-white shadow-[var(--shadow-soft)] md:block">
-        <table className="w-full min-w-[1180px]">
-          <thead className="bg-slate-50/85 text-left text-sm text-slate-500">
-            <tr>
-              <th className="px-4 py-4">
-                <input
-                  type="checkbox"
-                  checked={allVisibleSelected}
-                  onChange={toggleSelectAllVisible}
-                  className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                />
-              </th>
-              <th className="px-4 py-4">Đơn hàng</th>
-              <th className="px-4 py-4">Khách hàng</th>
-              <th className="px-4 py-4">Thanh toán</th>
-              <th className="px-4 py-4">Tổng tiền</th>
-              <th className="px-4 py-4">Trạng thái</th>
-              <th className="px-4 py-4 text-right">Thao tác</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 text-sm">
-            {orders.map((order) => (
-              <tr key={order.id} className={selectedOrderSet.has(order.id) ? 'bg-emerald-50/40' : 'hover:bg-slate-50/60'}>
-                <td className="px-4 py-4 align-top">
+      <div className="hidden overflow-hidden rounded-[28px] border border-[color:var(--line-soft)] bg-white shadow-[var(--shadow-soft)] md:block">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1180px]">
+            <thead className="bg-slate-50 text-left text-sm text-slate-500">
+              <tr>
+                <th className="px-4 py-4">
                   <input
                     type="checkbox"
-                    checked={selectedOrderSet.has(order.id)}
-                    onChange={() => toggleSelectOrder(order.id)}
-                    className="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                    checked={allVisibleSelected}
+                    onChange={toggleSelectAllVisible}
+                    className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
                   />
-                </td>
-                <td className="px-4 py-4 align-top">
-                  <p className="font-black text-slate-950">{order.order_number || `#${order.id}`}</p>
-                  <p className="mt-1 text-xs text-slate-500">{formatDateTime(order.created_at)}</p>
-                </td>
-                <td className="px-4 py-4 align-top">
-                  <p className="font-semibold text-slate-900">{order.customerName}</p>
-                  <p className="mt-1 text-xs text-slate-500">{order.customerEmail || 'Không có email'}</p>
-                </td>
-                <td className="px-4 py-4 align-top">
-                  <p className="font-semibold text-slate-900">{getPaymentLabel(order.payment_method)}</p>
-                  <p className="mt-1 text-xs text-slate-500">{safeText(order.shipping_city, 'Chưa có địa chỉ')}</p>
-                </td>
-                <td className="px-4 py-4 align-top font-black text-emerald-700">
-                  {formatVndValue(order.total)} đ
-                </td>
-                <td className="px-4 py-4 align-top">
-                  <OrderStatusBadge status={order.status} />
-                  <div className="mt-3">
-                    <OrderStatusProgress status={order.status} />
-                  </div>
-                  <select
-                    value={order.status}
-                    onChange={(event) => handleSingleStatusUpdate(order.id, event.target.value)}
-                    disabled={loading}
-                    className="mt-3 w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-                  >
-                    {ORDER_STATUSES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                  </select>
-                </td>
-                <td className="px-4 py-4 align-top">
-                  <div className="flex justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => openOrderDetail(order.id)}
-                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                </th>
+                <th className="px-4 py-4">Đơn hàng</th>
+                <th className="px-4 py-4">Khách hàng</th>
+                <th className="px-4 py-4">Thanh toán</th>
+                <th className="px-4 py-4">Tổng tiền</th>
+                <th className="px-4 py-4">Trạng thái</th>
+                <th className="px-4 py-4 text-right">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-sm">
+              {orders.map((order) => (
+                <tr key={order.id} className={selectedOrderSet.has(order.id) ? 'bg-emerald-50/35' : 'hover:bg-slate-50'}>
+                  <td className="px-4 py-4 align-top">
+                    <input
+                      type="checkbox"
+                      checked={selectedOrderSet.has(order.id)}
+                      onChange={() => toggleSelectOrder(order.id)}
+                      className="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                  </td>
+                  <td className="px-4 py-4 align-top">
+                    <p className="font-mono text-sm font-black text-slate-950">{order.order_number || `#${order.id}`}</p>
+                    <p className="mt-1 text-xs text-slate-500">{formatDateTime(order.created_at)}</p>
+                  </td>
+                  <td className="px-4 py-4 align-top">
+                    <p className="font-semibold text-slate-900">{order.customerName}</p>
+                    <p className="mt-1 text-xs text-slate-500">{order.customerEmail || 'Không có email'}</p>
+                  </td>
+                  <td className="px-4 py-4 align-top">
+                    <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${getPaymentBadgeClass(order.payment_method)}`}>
+                      {getPaymentLabel(order.payment_method)}
+                    </span>
+                    <p className="mt-2 text-xs text-slate-500">{safeText(order.shipping_city, 'Chưa có địa chỉ')}</p>
+                  </td>
+                  <td className="px-4 py-4 align-top text-base font-black text-emerald-700">
+                    {formatVndValue(order.total)} d
+                  </td>
+                  <td className="px-4 py-4 align-top">
+                    <OrderStatusBadge status={order.status} />
+                    <div className="mt-3 hidden xl:block">
+                      <OrderStatusProgress status={order.status} />
+                    </div>
+                    <select
+                      value={order.status}
+                      onChange={(event) => handleSingleStatusUpdate(order.id, event.target.value)}
+                      disabled={loading}
+                      className="mt-3 w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
                     >
-                      <Eye size={16} />
-                      Chi tiết
-                    </button>
-                    {canDeleteOrders && (
+                      {ORDER_STATUSES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select>
+                  </td>
+                  <td className="px-4 py-4 align-top">
+                    <div className="flex justify-end gap-2">
                       <button
                         type="button"
-                        onClick={() => handleDeleteOrder(order.id)}
-                        className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rose-700"
+                        onClick={() => openOrderDetail(order.id)}
+                        className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                       >
-                        <Trash2 size={16} />
-                        Xóa
+                        <Eye size={16} />
+                        Chi tiết
                       </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                      {canDeleteOrders ? (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteOrder(order.id)}
+                          className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 px-4 py-2.5 text-sm font-semibold text-rose-600 hover:bg-rose-50"
+                        >
+                          <Trash2 size={16} />
+                          Xóa
+                        </button>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      {!loading && orders.length === 0 && (
-        <div className="rounded-[30px] border border-[color:var(--line-soft)] bg-white p-10 text-center shadow-[var(--shadow-soft)]">
-          <p className="text-base font-bold text-slate-900">Không tìm thấy đơn hàng phù hợp</p>
-          <p className="mt-2 text-sm text-slate-500">Thử thay đổi bộ lọc hoặc tìm kiếm bằng mã đơn / tên khách hàng.</p>
+      {!loading && orders.length === 0 ? (
+        <div className="rounded-[28px] border border-[color:var(--line-soft)] bg-white p-10 text-center shadow-[var(--shadow-soft)]">
+          <Search size={22} className="mx-auto text-slate-400" />
+          <p className="mt-4 text-base font-bold text-slate-900">Không tìm thấy đơn hàng phù hợp</p>
+          <p className="mt-2 text-sm text-slate-500">Thử thay đổi bộ lọc hoặc tìm kiếm bằng mã đơn và tên khách hàng.</p>
         </div>
-      )}
+      ) : null}
 
-      <div className="flex flex-col gap-4 rounded-[28px] border border-[color:var(--line-soft)] bg-white px-5 py-4 shadow-[var(--shadow-soft)] md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-col gap-4 rounded-[24px] border border-[color:var(--line-soft)] bg-white px-5 py-4 shadow-[var(--shadow-soft)] md:flex-row md:items-center md:justify-between">
         <div>
           <p className="text-sm font-semibold text-slate-900">Trang {meta.page}/{meta.total_pages || 1}</p>
           <p className="text-xs text-slate-500">Mỗi trang hiển thị tối đa {meta.limit} đơn hàng.</p>
@@ -715,8 +749,37 @@ const OrderManagementPanel = ({ active, refreshNonce, canDeleteOrders }) => {
         </div>
       </div>
 
-      {drawerOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/45 backdrop-blur-sm">
+      <div
+        className={`pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center px-4 transition-all duration-200 ${
+          selectedOrderIds.length > 0 ? 'translate-y-0 opacity-100' : 'translate-y-6 opacity-0'
+        }`}
+      >
+        <div className="pointer-events-auto flex w-full max-w-3xl flex-col gap-3 rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-[0_24px_60px_rgba(15,23,42,0.18)] sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm font-semibold text-slate-900">
+            Đang chọn <span className="font-black text-emerald-700">{selectedOrderIds.length}</span> đơn
+          </p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <select
+              value={bulkStatus}
+              onChange={(event) => setBulkStatus(event.target.value)}
+              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+            >
+              {ORDER_STATUSES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+            <button
+              type="button"
+              onClick={handleBulkStatusUpdate}
+              disabled={loading || selectedOrderIds.length === 0}
+              className="rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white shadow-[0_14px_28px_rgba(5,150,105,0.22)] transition hover:bg-emerald-700 disabled:opacity-60"
+            >
+              Cập nhật
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {drawerOpen ? (
+        <div className="fixed inset-0 z-[90] bg-slate-950/45 backdrop-blur-sm">
           <button type="button" aria-label="Đóng chi tiết đơn hàng" className="absolute inset-0 h-full w-full cursor-default" onClick={closeDrawer} />
           <aside className="absolute inset-x-0 bottom-0 top-auto max-h-[90vh] overflow-auto rounded-t-[32px] border border-white/70 bg-[rgba(255,255,255,0.98)] p-5 shadow-[var(--shadow-overlay)] md:inset-y-0 md:right-0 md:left-auto md:h-full md:w-[580px] md:rounded-none md:p-6">
             <div className="flex items-start justify-between gap-4">
@@ -725,7 +788,9 @@ const OrderManagementPanel = ({ active, refreshNonce, canDeleteOrders }) => {
                 <h3 className="mt-2 text-2xl font-black text-slate-950">
                   {orderDetail?.order_number || (detailLoading ? 'Đang tải...' : 'Đơn hàng')}
                 </h3>
-                <p className="mt-1 text-sm text-slate-500">{orderDetail ? formatDateTime(orderDetail.created_at) : 'Kiểm tra thông tin khách hàng và trạng thái giao hàng.'}</p>
+                <p className="mt-1 text-sm text-slate-500">
+                  {orderDetail ? formatDateTime(orderDetail.created_at) : 'Kiểm tra thông tin khách hàng và trạng thái giao hàng.'}
+                </p>
               </div>
               <button
                 type="button"
@@ -800,11 +865,11 @@ const OrderManagementPanel = ({ active, refreshNonce, canDeleteOrders }) => {
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <p className="font-semibold text-slate-900">{item.product_name}</p>
-                            <p className="mt-1 text-xs text-slate-500">Đơn giá: {formatVndValue(item.price_at_purchase)} đ</p>
+                            <p className="mt-1 text-xs text-slate-500">Don gia: {formatVndValue(item.price_at_purchase)} d</p>
                           </div>
                           <div className="text-right">
                             <p className="text-sm font-bold text-slate-900">x{item.quantity}</p>
-                            <p className="mt-1 text-sm font-black text-emerald-700">{formatVndValue(item.subtotal)} đ</p>
+                            <p className="mt-1 text-sm font-black text-emerald-700">{formatVndValue(item.subtotal)} d</p>
                           </div>
                         </div>
                       </div>
@@ -830,7 +895,7 @@ const OrderManagementPanel = ({ active, refreshNonce, canDeleteOrders }) => {
             ) : null}
           </aside>
         </div>
-      )}
+      ) : null}
     </section>
   );
 };

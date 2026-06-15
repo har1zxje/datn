@@ -96,7 +96,7 @@ const normalizeSuggestedProduct = (product = {}, matchLabel = '') => {
   const price = Number(product.price ?? product.discount_price ?? 0);
   return {
     id: product.id ?? product.product_id ?? product.sku ?? product.name,
-    name: product.name || product.product_name || 'San pham FreshFood',
+    name: product.name || product.product_name || 'Sản phẩm FreshFood',
     price,
     priceText: product.priceText || product.price_text || formatPrice(price),
     unit: product.unit || '',
@@ -256,7 +256,7 @@ const normalizeN8nResponse = (data, originalMessage = '', availableProducts = []
   );
 
   return {
-    content: content || 'Toi chua nhan duoc phan hoi phu hop tu he thong.',
+    content: content || 'Tôi chưa nhận được phản hồi phù hợp từ hệ thống.',
     products: responseProducts.length ? responseProducts : inferredProducts,
     raw: data,
   };

@@ -55,7 +55,7 @@ const Navbar = () => {
 
   const userMenuRef = useRef(null);
   const notificationMenuRef = useRef(null);
-  const canAccessCart = canUseCart && !user?.is_admin;
+  const canAccessCart = canUseCart;
   const unreadNotifications = notifications.filter((item) => !item.is_read).length;
 
   const displayName = safeText(user?.full_name || user?.username, language === 'en' ? 'Customer' : 'Khách hàng');
@@ -183,12 +183,12 @@ const Navbar = () => {
             <Link
               to="/"
               className="flex shrink-0 items-center gap-3 rounded-2xl px-1 py-1 text-slate-950 outline-none transition-all duration-300 hover:text-emerald-700 focus-visible:ring-2 focus-visible:ring-emerald-300"
-              aria-label="NutriGro - Trang chủ"
+              aria-label="FreshFood AI - Trang chủ"
             >
               <BrandMark />
               <span className="leading-tight">
                 <span className="block text-base font-black tracking-tight md:text-lg">FreshFood AI</span>
-                <span className="hidden text-xs font-semibold text-emerald-100 sm:block">Năng lượng xanh, sống trong lành</span>
+                <span className="hidden text-xs font-semibold text-emerald-100 sm:block">Mua tươi, kiểm tra rõ</span>
               </span>
             </Link>
 
@@ -266,7 +266,7 @@ const Navbar = () => {
                     <div className="absolute right-0 z-20 mt-2 w-[min(24rem,90vw)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
                       <div className="border-b border-slate-100 bg-emerald-50 px-4 py-3">
                         <p className="font-bold text-slate-900">Thông báo</p>
-                        <p className="text-xs text-slate-500">Các mốc đơn hàng cần bạn xử lý</p>
+                        <p className="text-xs text-slate-500">Các việc cần xử lý</p>
                       </div>
                       <div className="max-h-96 overflow-y-auto">
                         {loadingNotifications ? (
@@ -398,7 +398,7 @@ const Navbar = () => {
                             }`}
                           >
                             <ShieldCheck size={16} />
-                            {user?.is_admin ? 'Admin Dashboard' : 'Quản lý'}
+                            {user?.is_admin ? 'Dashboard' : 'Quản lý'}
                           </Link>
                         )}
 
@@ -583,7 +583,7 @@ const Navbar = () => {
                   }`}
                 >
                   <ShieldCheck size={15} />
-                  {user?.is_admin ? 'Admin Dashboard' : 'Quản lý'}
+                  {user?.is_admin ? 'Dashboard' : 'Quản lý'}
                 </Link>
               )}
             </nav>

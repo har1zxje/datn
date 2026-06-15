@@ -343,8 +343,7 @@ body.theme-mono .app-page-bg {
 }
 
 .navbar {
-  position: sticky;
-  top: 0;
+  position: relative;
   z-index: 60;
 }
 

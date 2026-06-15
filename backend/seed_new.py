@@ -21,9 +21,9 @@ def slugify(value: str) -> str:
 
 
 CATEGORY_STOCK_NOTES = {
-    "in_stock": "con hang voi so luong on dinh",
-    "low_stock": "sap het hang, nen dat som de giu ton",
-    "out_of_stock": "tam het hang va se duoc bo sung trong dot tiep theo",
+    "in_stock": "còn hàng với số lượng ổn định",
+    "low_stock": "sắp hết hàng, nên đặt sớm để giữ tồn",
+    "out_of_stock": "tạm hết hàng và sẽ được bổ sung trong đợt tiếp theo",
 }
 
 
@@ -34,11 +34,11 @@ def build_product_description(
     origin: str,
     stock_status: str,
 ) -> str:
-    stock_note = CATEGORY_STOCK_NOTES.get(stock_status, "dang cap nhat trang thai kho")
+    stock_note = CATEGORY_STOCK_NOTES.get(stock_status, "đang cập nhật trạng thái kho")
     return (
-        f"{name} duoc tuyen chon tu nguon cung cap uy tin va kiem soat chat luong theo tung lo hang. "
-        f"San pham phu hop cho bua an hang ngay, de ket hop linh hoat voi nhieu cach che bien trong gia dinh. "
-        f"Dong goi theo don vi {unit}, xuat xu {origin}, hien {stock_note} tai he thong NutriGro."
+        f"{name} được tuyển chọn từ nguồn cung cấp uy tín và kiểm soát chất lượng theo từng lô hàng. "
+        f"Sản phẩm phù hợp cho bữa ăn hằng ngày, dễ kết hợp linh hoạt với nhiều cách chế biến trong gia đình. "
+        f"Đóng gói theo đơn vị {unit}, xuất xứ {origin}, hiện {stock_note} tại hệ thống NutriGro."
     )
 
 

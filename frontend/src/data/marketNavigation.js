@@ -123,10 +123,10 @@ export const promotionBadges = [
   '-25%',
 ];
 
-export const getPromotionBadge = (product, index = 0) => {
-  if (product?.discount_percent) return `-${product.discount_percent}%`;
+export const getPromotionBadge = (product) => {
   if (product?.promotion_label) return product.promotion_label;
-  return promotionBadges[index % promotionBadges.length];
+  if (product?.discount_percent) return `-${Math.round(product.discount_percent)}%`;
+  return '';
 };
 
 export const matchesMarketCategory = (product, category) => {

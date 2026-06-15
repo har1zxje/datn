@@ -2,22 +2,22 @@ import { quickAnalyzeScan } from './api';
 import { predictFreshness } from './ScannerService';
 
 const STORAGE_GUIDE = {
-  fresh: 'Bao quan lanh 2-5 do C va uu tien dung trong ngay de giu chat luong tot nhat.',
-  early: 'Nen su dung som trong 12-24 gio toi va tranh de o nhiet do phong qua lau.',
-  stale: 'Khuyen nghi ngung su dung va chon phuong an boi thuong neu thuc pham khong dat ky vong.',
+  fresh: 'Bảo quản lạnh 2-5 độ C và ưu tiên dùng trong ngày để giữ chất lượng tốt nhất.',
+  early: 'Nên sử dụng sớm trong 12-24 giờ tới và tránh để ở nhiệt độ phòng quá lâu.',
+  stale: 'Khuyến nghị ngừng sử dụng và chọn phương án bồi thường nếu thực phẩm không đạt kỳ vọng.',
 };
 
 const FOOD_NAME_MAP = {
-  produce: 'Nong san',
-  apple: 'Tao',
-  banana: 'Chuoi',
-  tomato: 'Ca chua',
-  cucumber: 'Dua chuot',
-  potato: 'Khoai tay',
-  leafy: 'Rau la',
-  meat: 'Thit',
-  fish: 'Ca',
-  other: 'Thuc pham',
+  produce: 'Nông sản',
+  apple: 'Táo',
+  banana: 'Chuối',
+  tomato: 'Cà chua',
+  cucumber: 'Dưa chuột',
+  potato: 'Khoai tây',
+  leafy: 'Rau lá',
+  meat: 'Thịt',
+  fish: 'Cá',
+  other: 'Thực phẩm',
 };
 
 const TFJS_LABEL_TO_PROFILE = {
@@ -72,9 +72,9 @@ const getToneFromScore = (score) => {
 };
 
 const getStatusLabelFromScore = (score) => {
-  if (score >= 75) return 'Tuoi tot';
-  if (score >= 50) return 'Dung som';
-  return 'Kem tuoi';
+  if (score >= 75) return 'Tươi tốt';
+  if (score >= 50) return 'Dùng sớm';
+  return 'Kém tươi';
 };
 
 const getStorageGuideFromScore = (score) => {
@@ -93,8 +93,8 @@ const buildOodResult = (backendResult, resolvedProfile) => ({
   aiConfidence: clampUnit(Number(backendResult?.max_confidence || 0)),
   aiConfidencePct: Math.round(clampUnit(Number(backendResult?.max_confidence || 0)) * 100),
   aiLabel: null,
-  statusLabel: 'Can danh gia thu cong',
-  storageGuide: 'AI khong du tu tin de ket luan. Nen chup lai anh hoac chuyen sang danh gia thu cong.',
+  statusLabel: 'Cần đánh giá thủ công',
+  storageGuide: 'AI không đủ tự tin để kết luận. Nên chụp lại ảnh hoặc chuyển sang đánh giá thủ công.',
   tone: 'amber',
   assessmentBasis: backendResult?.assessment_basis || 'tfjs_client_ood_v1',
   qualityAssessment: backendResult?.quality_assessment || null,
@@ -105,7 +105,7 @@ const buildOodResult = (backendResult, resolvedProfile) => ({
   modelVersion: backendResult?.assessment_basis || 'tfjs_client_ood_v1',
   source: 'backend_quick',
   isFallback: false,
-  message: backendResult?.message || 'Khong nhan dien duoc thuc pham trong anh.',
+  message: backendResult?.message || 'Không nhận diện được thực phẩm trong ảnh.',
   supportedClasses: Array.isArray(backendResult?.supported_classes) ? backendResult.supported_classes : [],
   maxConfidence: Number(backendResult?.max_confidence || 0),
 });
@@ -172,12 +172,12 @@ export const analyzeFreshnessImage = async ({
   orderId,
 }) => {
   if (!model || !imageElement) {
-    throw new Error('AI hien chua san sang. Ban co the bo qua AI de gui xac nhan thu cong.');
+    throw new Error('AI hiện chưa sẵn sàng. Bạn có thể bỏ qua AI để gửi xác nhận thủ công.');
   }
 
   const tfjsPrediction = await predictFreshness(model, imageElement);
   if (!tfjsPrediction) {
-    throw new Error('AI khong doc duoc anh. Vui long chup lai anh ro net hon.');
+    throw new Error('AI không đọc được ảnh. Vui lòng chụp lại ảnh rõ nét hơn.');
   }
 
   let resolvedProfile = spoilageProfile || 'produce';

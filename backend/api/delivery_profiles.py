@@ -14,11 +14,7 @@ router = APIRouter(prefix="/delivery-profiles", tags=["Delivery Profiles"])
 
 
 def _ensure_customer(current_user: models.User) -> None:
-    if current_user.is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin không thể sử dụng sổ địa chỉ cá nhân",
-        )
+    return None
 
 
 def _get_profile_or_404(profile_id: int, user_id: int, db: Session) -> models.DeliveryProfile:

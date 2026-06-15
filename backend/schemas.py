@@ -73,6 +73,7 @@ class UserProfile(UserBase):
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     password: Optional[str] = Field(None, min_length=6)
+    current_password: Optional[str] = Field(None, min_length=6)
     phone: Optional[str] = None
     avatar_url: Optional[str] = None
     bio: Optional[str] = None
@@ -124,6 +125,9 @@ class ProductBase(BaseModel):
     category_id: int
     price: Decimal
     discount_price: Optional[Decimal] = None
+    promotion_type: str = "none"
+    promotion_value: Decimal = Decimal("0")
+    promotion_label: Optional[str] = None
     quantity: int = Field(..., ge=0)
     sku: Optional[str] = None
     origin: Optional[str] = None
@@ -141,6 +145,9 @@ class ProductUpdate(BaseModel):
     description: Optional[str] = None
     price: Optional[Decimal] = None
     discount_price: Optional[Decimal] = None
+    promotion_type: Optional[str] = None
+    promotion_value: Optional[Decimal] = None
+    promotion_label: Optional[str] = None
     quantity: Optional[int] = None
     is_featured: Optional[bool] = None
     is_active: Optional[bool] = None
@@ -152,6 +159,8 @@ class Product(ProductBase):
     image_url: Optional[str] = None
     rating: float
     review_count: int
+    sold_count: int = 0
+    discount_percent: float = 0
     is_active: bool
     is_featured: bool
     harvest_date: Optional[datetime] = None
@@ -212,6 +221,8 @@ class OrderCreate(BaseModel):
     shipping_city: str
     shipping_phone: str
     payment_method: str = "cod"  # card, bank_transfer, cod
+    voucher_code: Optional[str] = None
+    points_to_redeem: int = Field(default=0, ge=0)
     notes: Optional[str] = None
 
 class OrderUpdate(BaseModel):
@@ -237,6 +248,8 @@ class Order(BaseModel):
     payment_status: PaymentStatus
     order_type: str = "normal"
     replacement_parent_order_id: Optional[int] = None
+    voucher_code: Optional[str] = None
+    points_redeemed: int = 0
     shipping_address: Optional[str] = None
     shipping_city: Optional[str] = None
     shipping_phone: Optional[str] = None
@@ -246,7 +259,7 @@ class Order(BaseModel):
     created_at: datetime
     shipped_at: Optional[datetime] = None
     delivered_at: Optional[datetime] = None
-    freshness_reward_points: int = 50
+    freshness_reward_points: int = 100
     freshness_confirmation_available: bool = False
     freshness_confirmation_completed: bool = False
     freshness_confirmation_expired: bool = False
@@ -406,10 +419,47 @@ class AdminScanFeedbackListResponse(BaseModel):
     items: List[AdminScanFeedbackResponse]
     total: int
     unread_count: int
+    read_count: int = 0
+    disputed_count: int = 0
+    global_total: int = 0
+    global_unread_count: int = 0
+    global_read_count: int = 0
+    global_disputed_count: int = 0
     page: int = 1
     limit: int = 12
     total_pages: int = 1
     has_next: bool = False
+
+
+class AdminFreshnessVerificationReportItem(BaseModel):
+    id: int
+    order_id: int
+    order_number: str
+    order_item_id: int
+    product_id: int
+    product_name: str
+    image_url: str
+    predicted_label: Optional[str] = None
+    predicted_result: Optional[str] = None
+    confidence: float = 0
+    is_prediction_correct: Optional[bool] = None
+    correct_label: Optional[str] = None
+    correct_result: Optional[str] = None
+    manual_note: Optional[str] = None
+    reward_points: int = 0
+    voucher_id: Optional[int] = None
+    voucher_code: Optional[str] = None
+    created_at: datetime
+    user: Optional[UserResponse] = None
+
+
+class AdminFreshnessVerificationReportListResponse(BaseModel):
+    items: List[AdminFreshnessVerificationReportItem]
+    total: int
+    page: int
+    limit: int
+    total_pages: int
+    has_next: bool
 
 
 class PaymentQRCodeResponse(BaseModel):
@@ -428,15 +478,15 @@ class PaymentQRCodeResponse(BaseModel):
 class FreshnessReviewUploadItem(BaseModel):
     order_item_id: int
     product_id: int
-    image_field: Optional[str] = None
+    image_field: str
     is_public: bool = True
-    review_mode: Literal["ai", "manual"] = "ai"
-    ai_label: Optional[Literal["fresh", "stale"]] = None
-    ai_confidence: Optional[float] = Field(default=None, ge=0, le=1)
-    freshness_score: Optional[int] = Field(default=None, ge=0, le=100)
-    manual_rating: Optional[Literal["good", "normal", "poor"]] = None
+    predicted_label: str = Field(..., min_length=1, max_length=120)
+    predicted_result: Literal["fresh", "spoiled"]
+    confidence: float = Field(..., ge=0, le=1)
+    is_prediction_correct: bool
+    correct_label: Optional[str] = Field(default=None, max_length=120)
+    correct_result: Optional[Literal["fresh", "spoiled"]] = None
     manual_note: Optional[str] = None
-    skipped_ai: bool = False
 
 
 class FreshnessConfirmationSubmitPayload(BaseModel):
@@ -453,6 +503,13 @@ class FreshnessReviewResponse(BaseModel):
     ai_label: Optional[str] = None
     ai_confidence: Optional[float] = None
     freshness_score: Optional[int] = None
+    predicted_label: Optional[str] = None
+    predicted_result: Optional[str] = None
+    is_prediction_correct: Optional[bool] = None
+    correct_label: Optional[str] = None
+    correct_result: Optional[str] = None
+    reward_points: int = 0
+    voucher_id: Optional[int] = None
     manual_rating: Optional[str] = None
     manual_note: Optional[str] = None
     is_public: bool = True
@@ -470,8 +527,21 @@ class FreshnessConfirmationEligibilityResponse(BaseModel):
     is_available: bool
     is_expired: bool
     already_confirmed: bool
-    reward_points: int = 50
+    reward_points: int = 100
+    correct_bonus_points: int = 50
+    incorrect_bonus_points: int = 100
     items: List[OrderItemDetail] = Field(default_factory=list)
+
+
+class FreshnessVoucherResponse(BaseModel):
+    id: Optional[int] = None
+    code: str
+    title: str
+    reason: str
+    discount_percent: Decimal = Decimal("0")
+    discount_amount: Decimal = Decimal("0")
+    expires_at: datetime
+    created_at: datetime
 
 
 class FreshnessConfirmationSubmitResponse(BaseModel):
@@ -479,7 +549,10 @@ class FreshnessConfirmationSubmitResponse(BaseModel):
     message: str
     awarded_points: int = 0
     loyalty_points: int = 0
-    has_low_score_reviews: bool = False
+    all_predictions_correct: bool = False
+    complaint_available: bool = False
+    thank_you_message: Optional[str] = None
+    voucher: Optional[FreshnessVoucherResponse] = None
     reviews: List[FreshnessReviewResponse] = Field(default_factory=list)
 
 
@@ -501,6 +574,82 @@ class FreshnessComplaintResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class VerificationPredictionPayload(BaseModel):
+    label: str = ""
+    freshness: str = ""
+    confidence: float = Field(default=0, ge=0, le=1)
+
+
+class VerificationReportCreate(BaseModel):
+    orderId: str
+    productId: str
+    productName: str
+    imageBase64: str
+    prediction: Optional[VerificationPredictionPayload] = None
+    scanCorrect: Optional[bool] = None
+    userFeedback: bool
+    pointsAwarded: int = Field(..., ge=0)
+    timestamp: datetime
+
+
+class VerificationReportResponse(BaseModel):
+    id: int
+    order_id: int
+    order_item_id: int
+    user_id: int
+    product_id: int
+    product_name: str
+    prediction_label: Optional[str] = None
+    prediction_freshness: Optional[str] = None
+    prediction_confidence: Optional[float] = None
+    scan_correct: Optional[bool] = None
+    user_feedback: bool
+    points_awarded: int
+    voucher_code: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class UserPointsUpdateRequest(BaseModel):
+    delta: int
+
+
+class UserPointsUpdateResponse(BaseModel):
+    success: bool = True
+    delta: int
+    loyalty_points: int
+
+
+class VoucherGenerateRequest(BaseModel):
+    userId: int
+    reason: str
+
+
+class VoucherGenerateResponse(BaseModel):
+    success: bool = True
+    code: str
+    title: str
+    reason: str
+    discount_percent: Decimal = Decimal("0")
+    discount_amount: Decimal = Decimal("0")
+    expires_at: datetime
+    created_at: datetime
+
+
+class VoucherSummaryResponse(BaseModel):
+    code: str
+    title: str
+    reason: str
+    discount_percent: Decimal = Decimal("0")
+    discount_amount: Decimal = Decimal("0")
+    created_at: datetime
+    expires_at: datetime
+    is_used: bool = False
+    is_expired: bool = False
 
 
 class ProductFreshnessReviewPublicItem(BaseModel):
@@ -650,6 +799,16 @@ class OrderBulkStatusUpdate(BaseModel):
 
 
 class AdminOrderListResponse(BaseModel):
+    items: List[Order]
+    total: int
+    page: int
+    limit: int
+    total_pages: int
+    has_next: bool
+    status_counts: Dict[str, int] = Field(default_factory=dict)
+
+
+class UserOrderListResponse(BaseModel):
     items: List[Order]
     total: int
     page: int

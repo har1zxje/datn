@@ -10,10 +10,12 @@ FREE_SHIPPING_THRESHOLD = Decimal("500000")  # Miễn phí ship khi đơn >= 500
 STANDARD_SHIPPING_FEE = Decimal("30000")   # Phí ship cố định 30k VND
 
 # ── Freshness / Độ tươi ──────────────────────────────────
-FRESHNESS_REFUND_RATE = Decimal("0.30")    # Hoàn 30% tiền khi khiếu nại thành công
-FRESHNESS_REWARD_POINTS = 50              # Điểm thưởng khi xác nhận độ tươi
-FRESHNESS_CONFIRMATION_HOURS = 24         # Thời hạn xác nhận sau khi nhận hàng (giờ)
-FRESHNESS_LOW_SCORE_THRESHOLD = 70        # Điểm dưới ngưỡng này → có thể khiếu nại
+FRESHNESS_REFUND_RATE = Decimal("0.30")       # Hoàn 30% tiền khi khiếu nại thành công
+FRESHNESS_REWARD_POINTS = 100                 # Điểm cơ bản khi hoàn thành xác nhận độ tươi
+FRESHNESS_REWARD_CORRECT_BONUS = 50           # Bonus khi toàn bộ dự đoán AI được xác nhận đúng
+FRESHNESS_REWARD_INCORRECT_BONUS = 100        # Bonus tri ân khi có ít nhất một dự đoán AI sai
+FRESHNESS_CONFIRMATION_HOURS = 24             # Thời hạn xác nhận sau khi nhận hàng (giờ)
+FRESHNESS_LOW_SCORE_THRESHOLD = 70            # Điểm dưới ngưỡng này → có thể khiếu nại
 
 # ── AI / Scanner ─────────────────────────────────────────
 OOD_CONFIDENCE_THRESHOLD = 0.60          # Ngưỡng OOD detection (xem .env OOD_THRESHOLD)

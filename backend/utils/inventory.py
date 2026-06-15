@@ -31,7 +31,7 @@ def apply_stock_delta(
     if next_quantity < 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"So luong ton kho khong du. Hien tai: {current_quantity}, thay doi: {delta}",
+            detail=f"Số lượng tồn kho không đủ. Hiện tại: {current_quantity}, thay đổi: {delta}",
         )
 
     product.quantity = next_quantity

@@ -170,7 +170,7 @@ class TestOrderCreation:
         assert float(data["tax"]) == pytest.approx(10000.0, abs=1)
         assert float(data["shipping_fee"]) == pytest.approx(30000.0, abs=1)
 
-    def test_admin_cannot_create_order(self, client, db_session):
+    def test_admin_can_create_order(self, client, db_session):
         admin = _create_user(db_session, username="admin1", email="admin1@example.com", is_admin=True)
         cat = _create_category(db_session)
         product = _create_product(db_session, cat.id, quantity=10)
@@ -187,7 +187,10 @@ class TestOrderCreation:
             },
             headers=_auth_headers(admin.id),
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 200, resp.text
+
+        db_session.refresh(product)
+        assert product.quantity == 9
 
     def test_create_order_free_shipping_above_threshold(self, client, db_session):
         user = _create_user(db_session, username="buyer4", email="buyer4@example.com")
@@ -209,3 +212,56 @@ class TestOrderCreation:
         assert resp.status_code == 200
         data = resp.json()
         assert float(data["shipping_fee"]) == 0.0
+
+    def test_list_orders_paginated_returns_meta(self, client, db_session):
+        user = _create_user(db_session, username="buyer5", email="buyer5@example.com")
+        cat = _create_category(db_session)
+        product = _create_product(db_session, cat.id, quantity=20)
+        db_session.commit()
+
+        headers = _auth_headers(user.id)
+        payload = {
+            "items": [{"product_id": product.id, "quantity": 1}],
+            "shipping_address": "123 Test St",
+            "shipping_city": "Hanoi",
+            "shipping_phone": "0901234567",
+            "payment_method": "cod",
+        }
+
+        for _ in range(3):
+            resp = client.post("/api/orders", json=payload, headers=headers)
+            assert resp.status_code == 200, resp.text
+
+        resp = client.get("/api/orders/paginated?page=2&limit=2", headers=headers)
+        assert resp.status_code == 200, resp.text
+
+        data = resp.json()
+        assert data["page"] == 2
+        assert data["limit"] == 2
+        assert data["total"] == 3
+        assert data["total_pages"] == 2
+        assert data["has_next"] is False
+        assert len(data["items"]) == 1
+        assert data["status_counts"]["pending"] == 3
+
+    def test_admin_can_manage_delivery_profiles(self, client, db_session):
+        admin = _create_user(db_session, username="admin2", email="admin2@example.com", is_admin=True)
+        db_session.commit()
+
+        headers = _auth_headers(admin.id)
+        payload = {
+            "full_name": "Admin User",
+            "phone": "0901234567",
+            "address": "123 Admin Street",
+            "city": "Hanoi",
+            "is_default": True,
+        }
+
+        create_resp = client.post("/api/delivery-profiles", json=payload, headers=headers)
+        assert create_resp.status_code == 201, create_resp.text
+
+        list_resp = client.get("/api/delivery-profiles", headers=headers)
+        assert list_resp.status_code == 200, list_resp.text
+        data = list_resp.json()
+        assert len(data) == 1
+        assert data[0]["full_name"] == "Admin User"

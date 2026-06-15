@@ -23,16 +23,8 @@ const mergeProductData = (base = {}, next = {}) => {
   };
 };
 
-const MOCK_FRESHNESS_SUMMARY = {
-  avg_score: 82,
-  total_reviews: 4,
-  reviews: [
-    { id: 'mock-1', customer_display_name: 'N. A.', customer_area: 'Quan 7, TP.HCM', freshness_score: 88, delivery_date: '2026-06-05T09:00:00Z' },
-    { id: 'mock-2', customer_display_name: 'T. P.', customer_area: 'Thu Duc, TP.HCM', freshness_score: 79, delivery_date: '2026-06-04T15:20:00Z' },
-    { id: 'mock-3', customer_display_name: 'H. L.', customer_area: 'Hai Chau, Da Nang', freshness_score: 84, delivery_date: '2026-06-03T11:30:00Z' },
-    { id: 'mock-4', customer_display_name: 'M. K.', customer_area: 'Ninh Kieu, Can Tho', freshness_score: 77, delivery_date: '2026-06-02T08:10:00Z' },
-  ],
-};
+const PLACEHOLDER_IMAGE = 'https://via.placeholder.com/960x960?text=No+Image';
+const EMPTY_FRESHNESS_SUMMARY = { avg_score: null, total_reviews: 0, reviews: [] };
 
 const ProductDetail = ({ productId, initialProduct = null, categories = [], onClose }) => {
   const [product, setProduct] = useState(initialProduct || null);
@@ -40,7 +32,7 @@ const ProductDetail = ({ productId, initialProduct = null, categories = [], onCl
   const [error, setError] = useState(null);
   const [quantity, setQuantity] = useState(1);
   const [addedToCart, setAddedToCart] = useState(false);
-  const [freshnessSummary, setFreshnessSummary] = useState(MOCK_FRESHNESS_SUMMARY);
+  const [freshnessSummary, setFreshnessSummary] = useState(EMPTY_FRESHNESS_SUMMARY);
   const [loadingFreshness, setLoadingFreshness] = useState(true);
   const closeButtonRef = useRef(null);
   const { addToCart, canUseCart } = useCart();
@@ -60,9 +52,9 @@ const ProductDetail = ({ productId, initialProduct = null, categories = [], onCl
         setLoadingFreshness(true);
         const summary = await getProductFreshnessReviews(productId);
         if (!isMounted) return;
-        setFreshnessSummary(summary.total_reviews > 0 ? summary : MOCK_FRESHNESS_SUMMARY);
+        setFreshnessSummary(summary.total_reviews > 0 ? summary : EMPTY_FRESHNESS_SUMMARY);
       } catch {
-        if (isMounted) setFreshnessSummary(MOCK_FRESHNESS_SUMMARY);
+        if (isMounted) setFreshnessSummary(EMPTY_FRESHNESS_SUMMARY);
       } finally {
         if (isMounted) setLoadingFreshness(false);
       }
@@ -131,7 +123,13 @@ const ProductDetail = ({ productId, initialProduct = null, categories = [], onCl
   const displayPrice = `${Number(product?.price || 0).toLocaleString('vi-VN')}đ`;
   const displayName = safeText(product?.name, 'Sản phẩm');
   const displayDescription = safeText(product?.description, 'Không có mô tả');
-  const freshnessAverage = Number(freshnessSummary?.avg_score || 0);
+  const freshnessAverage =
+    freshnessSummary?.avg_score == null || Number.isNaN(Number(freshnessSummary?.avg_score))
+      ? null
+      : Number(freshnessSummary.avg_score);
+  const stock = Number(product?.stock ?? product?.quantity ?? 0);
+  const isOutOfStock = stock <= 0;
+  const isLowStock = !isOutOfStock && stock <= 5;
 
   const handleAddToCart = () => {
     if (!product) return;
@@ -163,7 +161,7 @@ const ProductDetail = ({ productId, initialProduct = null, categories = [], onCl
 
   const modalShell = (children) => (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-[3px]"
+      className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-slate-950/65 p-3 backdrop-blur-[4px] sm:p-5 md:p-8"
       role="presentation"
       onClick={(event) => {
         if (event.target === event.currentTarget) {
@@ -203,151 +201,161 @@ const ProductDetail = ({ productId, initialProduct = null, categories = [], onCl
 
   return modalShell(
     <div
-      className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-3xl bg-white shadow-2xl"
+      className="relative my-auto w-full max-w-6xl overflow-hidden rounded-[32px] border border-white/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.985),rgba(244,248,245,0.97))] shadow-[0_28px_80px_rgba(15,23,42,0.28)]"
       role="dialog"
       aria-modal="true"
       aria-labelledby="product-detail-title"
     >
-      <div className="grid grid-cols-1 gap-8 p-6 md:grid-cols-2 md:gap-10 md:p-9">
-        <div className="flex items-center justify-center">
-          <img
-            src={product.img || product.image_url || 'https://via.placeholder.com/640?text=No+Image'}
-            alt={displayName}
-            className="h-full max-h-[470px] w-full rounded-3xl object-cover shadow-[0_20px_45px_rgba(15,23,42,0.12)]"
-            onError={(event) => {
-              event.currentTarget.src = 'https://via.placeholder.com/640?text=No+Image';
-            }}
-          />
-        </div>
+      <button
+        ref={closeButtonRef}
+        type="button"
+        onClick={onClose}
+        className="absolute right-4 top-4 z-20 inline-flex h-11 w-11 items-center justify-center rounded-full border border-slate-200/80 bg-white/90 text-slate-500 shadow-[0_10px_30px_rgba(15,23,42,0.12)] backdrop-blur transition hover:bg-white hover:text-slate-700"
+        aria-label="Đóng chi tiết sản phẩm"
+      >
+        <X size={18} />
+      </button>
 
-        <div className="flex flex-col justify-between">
-          <div>
-            <button
-              ref={closeButtonRef}
-              type="button"
-              onClick={onClose}
-              className="ml-auto inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
-              aria-label="Đóng chi tiết sản phẩm"
-            >
-              <X size={18} />
-            </button>
-
-            <h2 id="product-detail-title" className="font-product-title mt-4 text-3xl font-black tracking-tight text-slate-950">
-              {displayName}
-            </h2>
-
-            <div className="mt-3 flex items-center gap-2">
-              <Star size={16} className="fill-amber-400 text-amber-400" />
-              <span className="text-sm font-semibold text-slate-600">{product.rating || 0}/5</span>
-            </div>
-
-            <div className="mt-5">
-              <span className="text-sm font-semibold text-slate-500">Danh mục</span>
-              <p className="font-category-label mt-2 inline-block rounded-full bg-emerald-50 px-3 py-1.5 text-sm font-semibold text-emerald-700">
-                {displayCategory}
-              </p>
-            </div>
-
-            <div className="mt-5">
-              <label className="mb-2 block text-sm font-semibold text-slate-500">Mô tả</label>
-              <p className="leading-7 text-slate-600">{displayDescription}</p>
-            </div>
-
-            <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-600">Chỉ số tươi thực tế</p>
-                  <p className="mt-2 text-sm text-slate-600">
-                    Đánh giá công khai từ khách đã nhận hàng và được AI xác nhận.
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-2xl font-black text-emerald-700">
-                    {loadingFreshness ? '...' : `${freshnessAverage || 0}/100`}
-                  </p>
-                  <p className="text-xs font-semibold text-slate-500">
-                    {freshnessSummary?.total_reviews || 0} lượt xác nhận
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-4 space-y-3">
-                {(freshnessSummary?.reviews || []).slice(0, 5).map((review) => (
-                  <div key={review.id} className="rounded-2xl border border-white bg-white px-4 py-3 shadow-sm">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-bold text-slate-900">{review.customer_display_name}</p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {review.customer_area} • Nhận hàng {review.delivery_date ? new Date(review.delivery_date).toLocaleDateString('vi-VN') : 'gần đây'}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-lg font-black text-emerald-700">{review.freshness_score}/100</p>
-                        <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700">
-                          Được xác nhận bởi AI
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(320px,0.95fr)_minmax(0,1.15fr)]">
+        <div className="border-b border-slate-200/70 bg-[linear-gradient(180deg,rgba(234,246,239,0.9),rgba(255,255,255,0.96))] p-5 sm:p-6 lg:border-b-0 lg:border-r lg:p-8">
+          <div className="overflow-hidden rounded-[28px] border border-white/80 bg-white shadow-[0_24px_54px_rgba(15,23,42,0.12)]">
+            <div className="aspect-[4/4.2] w-full overflow-hidden bg-slate-100">
+              <img
+                src={product.img || product.image_url || PLACEHOLDER_IMAGE}
+                alt={displayName}
+                className="h-full w-full object-cover"
+                onError={(event) => {
+                  event.currentTarget.src = PLACEHOLDER_IMAGE;
+                }}
+              />
             </div>
           </div>
 
-          <div className="mt-8">
-            <p className="mb-5 text-3xl font-black text-emerald-600">{displayPrice}</p>
-
-            <div className="mb-5 flex items-center gap-4">
-              <label className="text-sm font-semibold text-slate-700">Số lượng</label>
-              <div className="inline-flex items-center rounded-xl border border-slate-200 bg-slate-50 p-1">
-                <button
-                  type="button"
-                  onClick={() => handleQuantityChange(quantity - 1)}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 transition hover:bg-white"
-                  aria-label="Giảm số lượng"
-                >
-                  <Minus size={16} />
-                </button>
-                <input
-                  type="number"
-                  value={quantity}
-                  onChange={(event) => handleQuantityChange(event.target.value)}
-                  className="h-9 w-14 border-0 bg-transparent text-center text-sm font-bold text-slate-900 outline-none"
-                  min="1"
-                />
-                <button
-                  type="button"
-                  onClick={() => handleQuantityChange(quantity + 1)}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 transition hover:bg-white"
-                  aria-label="Tăng số lượng"
-                >
-                  <Plus size={16} />
-                </button>
+          <div className="mt-5 rounded-[26px] border border-emerald-100/80 bg-white/92 p-5 shadow-[0_18px_40px_rgba(15,23,42,0.08)]">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 pb-4">
+              <div>
+                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-emerald-600">Chỉ số đánh giá độ tươi</p>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Tổng hợp từ các lượt xác minh sau giao.
+                </p>
+              </div>
+              <div className="rounded-[22px] bg-emerald-50 px-4 py-3 text-right">
+                <p className="text-3xl font-black text-emerald-700">
+                  {loadingFreshness ? '...' : freshnessAverage == null ? '--/100' : `${freshnessAverage}/100`}
+                </p>
+                <p className="text-xs font-semibold text-slate-500">
+                  {freshnessSummary?.total_reviews || 0} lượt xác nhận
+                </p>
               </div>
             </div>
 
-            {addedToCart && (
-              <div className="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
-                Đã thêm vào giỏ hàng
-              </div>
-            )}
+            <div className="mt-4 rounded-[20px] bg-slate-50 px-4 py-3">
+              <p className="text-sm font-semibold text-slate-700">
+                {loadingFreshness
+                  ? 'Đang tải dữ liệu độ tươi...'
+                  : freshnessSummary?.total_reviews > 0
+                    ? 'Điểm này dựa trên phản hồi thật của khách đã nhận hàng.'
+                    : 'Sản phẩm này chưa có phản hồi độ tươi công khai.'}
+              </p>
+            </div>
+          </div>
+        </div>
 
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={handleAddToCart}
-                disabled={!canUseCart}
-                className="flex-1 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-black text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+        <div className="max-h-[calc(100vh-2rem)] overflow-y-auto p-5 pr-3 sm:p-6 sm:pr-4 md:p-8 md:pr-5">
+          <div className="mx-auto max-w-2xl">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="inline-flex rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-black uppercase tracking-[0.14em] text-emerald-700">
+                Chi tiết sản phẩm
+              </span>
+              <div className="flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1.5 text-sm font-bold text-amber-700">
+                <Star size={15} className="fill-amber-400 text-amber-400" />
+                <span>{product.rating || 0}/5</span>
+              </div>
+              <span className="inline-flex rounded-full bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-700">
+                {displayCategory}
+              </span>
+              <span
+                className={`inline-flex rounded-full px-3 py-1.5 text-xs font-bold ${
+                  isOutOfStock
+                    ? 'bg-slate-200 text-slate-700'
+                    : isLowStock
+                      ? 'bg-amber-100 text-amber-800'
+                      : 'bg-emerald-50 text-emerald-700'
+                }`}
               >
-                {canUseCart ? 'Thêm vào giỏ hàng' : 'Admin không thể mua hàng'}
-              </button>
-              <button
-                type="button"
-                onClick={onClose}
-                className="flex-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
-              >
-                Đóng
-              </button>
+                {isOutOfStock ? 'Tạm hết hàng' : isLowStock ? `Sắp hết, còn ${stock}` : `Sẵn sàng, còn ${stock}`}
+              </span>
+            </div>
+
+            <h2 id="product-detail-title" className="font-product-title mt-4 text-3xl font-black tracking-tight text-slate-950 md:text-[2.2rem]">
+              {displayName}
+            </h2>
+
+            <div className="mt-5 rounded-[26px] border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_34px_rgba(15,23,42,0.05)]">
+              <label className="mb-2 block text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Mô tả</label>
+              <p className="text-[15px] leading-7 text-slate-600">{displayDescription}</p>
+            </div>
+
+            <div className="mt-6 rounded-[28px] border border-emerald-100 bg-[linear-gradient(180deg,rgba(236,253,245,0.88),rgba(255,255,255,0.96))] p-5 shadow-[0_20px_40px_rgba(16,185,129,0.08)]">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Giá hiện tại</p>
+                  <p className="mt-2 text-3xl font-black text-emerald-600">{displayPrice}</p>
+                </div>
+
+                <div className="flex items-center gap-4">
+                  <label className="text-sm font-semibold text-slate-700">Số lượng</label>
+                  <div className="inline-flex items-center rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+                    <button
+                      type="button"
+                      onClick={() => handleQuantityChange(quantity - 1)}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-50"
+                      aria-label="Giảm số lượng"
+                    >
+                      <Minus size={16} />
+                    </button>
+                    <input
+                      type="number"
+                      value={quantity}
+                      onChange={(event) => handleQuantityChange(event.target.value)}
+                      className="h-9 w-14 border-0 bg-transparent text-center text-sm font-bold text-slate-900 outline-none"
+                      min="1"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleQuantityChange(quantity + 1)}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-50"
+                      aria-label="Tăng số lượng"
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {addedToCart && (
+                <div className="mt-4 rounded-xl border border-emerald-200 bg-white px-4 py-3 text-sm font-semibold text-emerald-700">
+                  Đã thêm vào giỏ hàng
+                </div>
+              )}
+
+              <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={handleAddToCart}
+                  disabled={!canUseCart || isOutOfStock}
+                  className="flex-1 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-black text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                >
+                  {isOutOfStock ? 'Tạm hết hàng' : 'Thêm vào giỏ'}
+                </button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="flex-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+                >
+                  Đóng
+                </button>
+              </div>
             </div>
           </div>
         </div>

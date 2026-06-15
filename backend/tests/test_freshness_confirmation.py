@@ -6,8 +6,10 @@ import sys
 import uuid
 import datetime
 
+import pytest
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
+from sqlalchemy.exc import IntegrityError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ.setdefault("DATABASE_URL", "sqlite:///./freshfood_test.db")
@@ -128,7 +130,9 @@ def test_submit_freshness_confirmation_records_review_and_rewards_points():
     eligibility_payload = eligibility_response.json()
     assert eligibility_payload["is_available"] is True
     assert eligibility_payload["already_confirmed"] is False
-    assert len(eligibility_payload["items"]) == 1
+    assert eligibility_payload["reward_points"] == 100
+    assert eligibility_payload["correct_bonus_points"] == 50
+    assert eligibility_payload["incorrect_bonus_points"] == 100
 
     image_bytes = _build_test_image_bytes()
     payload = {
@@ -138,10 +142,10 @@ def test_submit_freshness_confirmation_records_review_and_rewards_points():
                 "product_id": product.id,
                 "image_field": "image_0",
                 "is_public": True,
-                "ai_label": "fresh",
-                "ai_confidence": 0.91,
-                "freshness_score": 91,
-                "skipped_ai": False,
+                "predicted_label": "apple",
+                "predicted_result": "fresh",
+                "confidence": 0.91,
+                "is_prediction_correct": True,
             }
         ]
     }
@@ -155,12 +159,17 @@ def test_submit_freshness_confirmation_records_review_and_rewards_points():
     assert submit_response.status_code == 200
     submit_payload = submit_response.json()
     assert submit_payload["success"] is True
-    assert submit_payload["awarded_points"] == 50
-    assert submit_payload["loyalty_points"] >= 50
-    assert submit_payload["has_low_score_reviews"] is False
+    assert submit_payload["awarded_points"] == 150
+    assert submit_payload["loyalty_points"] >= 150
+    assert submit_payload["all_predictions_correct"] is True
+    assert submit_payload["complaint_available"] is False
+    assert submit_payload["voucher"] is None
     assert len(submit_payload["reviews"]) == 1
     assert submit_payload["reviews"][0]["freshness_score"] == 91
-    assert submit_payload["reviews"][0]["ai_label"] == "fresh"
+    assert submit_payload["reviews"][0]["predicted_label"] == "apple"
+    assert submit_payload["reviews"][0]["correct_label"] == "apple"
+    assert submit_payload["reviews"][0]["correct_result"] == "fresh"
+    assert submit_payload["reviews"][0]["reward_points"] == 150
 
     with SessionLocal() as db:
         review = db.query(models.FreshnessReview).filter(models.FreshnessReview.order_id == order_id).first()
@@ -169,11 +178,16 @@ def test_submit_freshness_confirmation_records_review_and_rewards_points():
         assert review.product_id == product.id
         assert review.freshness_score == 91
         assert review.ai_label == "fresh"
+        assert review.predicted_label == "apple"
+        assert review.correct_label == "apple"
+        assert review.correct_result == "fresh"
+        assert review.reward_points == 150
+        assert review.voucher_id is None
         assert review.image_url.startswith("/uploads/freshness_reviews/")
 
         user = db.query(models.User).filter(models.User.id == user_id).first()
         assert user is not None
-        assert int(user.loyalty_points or 0) >= 50
+        assert int(user.loyalty_points or 0) >= 150
 
 
 def test_freshness_confirmation_eligibility_returns_ai_support_flags():
@@ -211,7 +225,7 @@ def test_freshness_confirmation_eligibility_returns_ai_support_flags():
     assert item_payload["ai_class_name"] == "apple"
 
 
-def test_submit_manual_freshness_confirmation_without_ai_image():
+def test_submit_freshness_confirmation_incorrect_prediction_and_spoiled_result_creates_voucher():
     token = _create_and_login_user(_make_unique("customer"), "123456")
     product = _create_product(quantity=5, ai_supported=False, ai_class_name=None)
 
@@ -238,14 +252,20 @@ def test_submit_manual_freshness_confirmation_without_ai_image():
         order.delivered_at = datetime.datetime.utcnow()
         db.commit()
 
+    image_bytes = _build_test_image_bytes()
     payload = {
         "reviews": [
             {
                 "order_item_id": order_item_id,
                 "product_id": product.id,
-                "review_mode": "manual",
-                "manual_rating": "normal",
-                "manual_note": "Danh gia thu cong cho san pham ngoai dataset AI",
+                "image_field": "image_0",
+                "predicted_label": "apple",
+                "predicted_result": "fresh",
+                "confidence": 0.77,
+                "is_prediction_correct": False,
+                "correct_label": "banana",
+                "correct_result": "spoiled",
+                "manual_note": "Sai nhãn và thực tế sản phẩm đã hỏng",
                 "is_public": True,
             }
         ]
@@ -255,18 +275,176 @@ def test_submit_manual_freshness_confirmation_without_ai_image():
         f"/api/orders/{order_id}/freshness-confirmation",
         headers={"Authorization": f"Bearer {token}"},
         data={"payload": json.dumps(payload)},
+        files={"image_0": ("freshness.png", image_bytes, "image/png")},
     )
     assert submit_response.status_code == 200
-    review_payload = submit_response.json()["reviews"][0]
-    assert review_payload["manual_rating"] == "normal"
-    assert review_payload["manual_note"] == "Danh gia thu cong cho san pham ngoai dataset AI"
-    assert review_payload["freshness_score"] is None
-    assert review_payload["ai_label"] is None
+    submit_payload = submit_response.json()
+    assert submit_payload["awarded_points"] == 200
+    assert submit_payload["all_predictions_correct"] is False
+    assert submit_payload["complaint_available"] is True
+    assert submit_payload["voucher"] is not None
+    assert submit_payload["reviews"][0]["correct_label"] == "banana"
+    assert submit_payload["reviews"][0]["correct_result"] == "spoiled"
+    assert submit_payload["reviews"][0]["reward_points"] == 200
 
     with SessionLocal() as db:
         review = db.query(models.FreshnessReview).filter(models.FreshnessReview.order_id == order_id).first()
         assert review is not None
-        assert review.manual_rating == "normal"
-        assert review.manual_note == "Danh gia thu cong cho san pham ngoai dataset AI"
-        assert review.ai_label is None
-        assert review.freshness_score is None
+        assert review.manual_rating == "spoiled"
+        assert review.manual_note == "Sai nhãn và thực tế sản phẩm đã hỏng"
+        assert review.ai_label == "fresh"
+        assert review.correct_result == "spoiled"
+        assert review.voucher_id is not None
+
+        voucher = db.query(models.GeneratedVoucher).filter(models.GeneratedVoucher.id == review.voucher_id).first()
+        assert voucher is not None
+        assert voucher.source_order_id == order_id
+
+
+def test_submit_freshness_confirmation_allows_multiple_items_in_same_order():
+    token = _create_and_login_user(_make_unique("customer"), "123456")
+    product_a = _create_product(quantity=5, ai_supported=False, ai_class_name=None)
+    product_b = _create_product(quantity=5, ai_supported=False, ai_class_name=None)
+
+    create_order_response = client.post(
+        "/api/orders",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "items": [
+                {"product_id": product_a.id, "quantity": 1},
+                {"product_id": product_b.id, "quantity": 1},
+            ],
+            "shipping_address": "123 Test Street",
+            "shipping_city": "Ho Chi Minh City",
+            "shipping_phone": "0900000000",
+            "payment_method": "cod",
+        },
+    )
+    assert create_order_response.status_code == 200
+    order_payload = create_order_response.json()
+    order_id = order_payload["id"]
+    order_items = order_payload["items"]
+
+    with SessionLocal() as db:
+        order = db.query(models.Order).filter(models.Order.id == order_id).first()
+        assert order is not None
+        order.status = models.OrderStatus.DELIVERED
+        order.delivered_at = datetime.datetime.utcnow()
+        db.commit()
+
+    image_bytes = _build_test_image_bytes()
+    payload = {
+        "reviews": [
+            {
+                "order_item_id": order_items[0]["id"],
+                "product_id": product_a.id,
+                "image_field": "image_0",
+                "predicted_label": "apple",
+                "predicted_result": "fresh",
+                "confidence": 0.83,
+                "is_prediction_correct": True,
+                "is_public": True,
+            },
+            {
+                "order_item_id": order_items[1]["id"],
+                "product_id": product_b.id,
+                "image_field": "image_1",
+                "predicted_label": "banana",
+                "predicted_result": "fresh",
+                "confidence": 0.71,
+                "is_prediction_correct": True,
+                "is_public": True,
+            },
+        ]
+    }
+
+    submit_response = client.post(
+        f"/api/orders/{order_id}/freshness-confirmation",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"payload": json.dumps(payload)},
+        files={
+            "image_0": ("freshness-a.png", image_bytes, "image/png"),
+            "image_1": ("freshness-b.png", image_bytes, "image/png"),
+        },
+    )
+    assert submit_response.status_code == 200
+    submit_payload = submit_response.json()
+    assert submit_payload["success"] is True
+    assert submit_payload["awarded_points"] == 150
+    assert len(submit_payload["reviews"]) == 2
+
+
+def test_freshness_review_unique_constraint_is_per_order_item_and_user():
+    token = _create_and_login_user(_make_unique("customer"), "123456")
+    product_a = _create_product(quantity=5)
+    product_b = _create_product(quantity=5)
+
+    create_order_response = client.post(
+        "/api/orders",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "items": [
+                {"product_id": product_a.id, "quantity": 1},
+                {"product_id": product_b.id, "quantity": 1},
+            ],
+            "shipping_address": "123 Test Street",
+            "shipping_city": "Ho Chi Minh City",
+            "shipping_phone": "0900000000",
+            "payment_method": "cod",
+        },
+    )
+    assert create_order_response.status_code == 200
+    order_payload = create_order_response.json()
+    order_id = order_payload["id"]
+    user_id = order_payload["user_id"]
+    first_item_id = order_payload["items"][0]["id"]
+    second_item_id = order_payload["items"][1]["id"]
+
+    with SessionLocal() as db:
+        db.add_all(
+            [
+                models.FreshnessReview(
+                    order_id=order_id,
+                    order_item_id=first_item_id,
+                    user_id=user_id,
+                    product_id=product_a.id,
+                    image_url="/uploads/freshness_reviews/review-1.png",
+                    predicted_label="apple",
+                    predicted_result="fresh",
+                    correct_label="apple",
+                    correct_result="fresh",
+                    is_public=True,
+                ),
+                models.FreshnessReview(
+                    order_id=order_id,
+                    order_item_id=second_item_id,
+                    user_id=user_id,
+                    product_id=product_b.id,
+                    image_url="/uploads/freshness_reviews/review-2.png",
+                    predicted_label="banana",
+                    predicted_result="fresh",
+                    correct_label="banana",
+                    correct_result="fresh",
+                    is_public=True,
+                ),
+            ]
+        )
+        db.commit()
+
+        db.add(
+            models.FreshnessReview(
+                order_id=order_id,
+                order_item_id=first_item_id,
+                user_id=user_id,
+                product_id=product_a.id,
+                image_url="/uploads/freshness_reviews/review-3.png",
+                predicted_label="apple",
+                predicted_result="fresh",
+                correct_label="apple",
+                correct_result="fresh",
+                is_public=True,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            db.commit()
+        db.rollback()
