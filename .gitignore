@@ -1,57 +1,63 @@
-# ============================================================
-# SECRETS — NEVER COMMIT
-# ============================================================
+# Secrets
 backend/.env
 frontend/.env
 *.env
 .env.local
 .env.production
 
-# ============================================================
 # Python
-# ============================================================
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
 .Python
 *.egg-info/
+.pytest_cache/
 dist/
 build/
 venv/
 .venv/
 env/
 
-# ============================================================
-# Node / Frontend
-# ============================================================
+# Node / frontend
 node_modules/
 dist/
 .cache/
 *.local
 
-# ============================================================
-# Database files — chứa data thực
-# ============================================================
-backend/freshfood.db
-backend/*.db
+# Runtime data
+*.db
 *.sqlite
 *.sqlite3
-
-# ============================================================
-# Uploads — user content, không commit
-# ============================================================
 backend/uploads/
+backend/logs/
+*.log
 
-# ============================================================
-# ML model binary weights — dùng Git LFS hoặc CDN
-# ============================================================
-frontend/public/tfjs_model/*.bin
+# Generated exports
+repomix-output.xml
 
-# ============================================================
-# IDE / OS
-# ============================================================
+# Editor / agent tooling
 .vscode/
 .idea/
 *.DS_Store
 Thumbs.db
+.agents/
+.claude/
+.codex/
+.cursor/
+.gemini/
+.kiro/
+.opencode/
+.pi/
+.rovodev/
+.trae/
+.trae-cn/
+.github/skills/
+skills-lock.json
+
+# Local assets not referenced by the app
+picture/
+
+# Keep deployed TFJS model weights tracked because the frontend
+# loads them directly at runtime from public/tfjs_model.
+!frontend/public/tfjs_model/*.bin

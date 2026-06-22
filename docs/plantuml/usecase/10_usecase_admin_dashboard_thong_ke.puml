@@ -1,0 +1,34 @@
+@startuml
+left to right direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam backgroundColor white
+skinparam ArrowColor #5B657A
+skinparam UsecaseBackgroundColor #F9FBFD
+skinparam UsecaseBorderColor #5B657A
+
+title NutriCare - Use Case Admin Dashboard Thong Ke
+
+actor "Quan tri vien" as Admin
+
+rectangle "Phan he dashboard thong ke" #F7ECFF {
+  usecase "Xem KPI tong quan" as UC_ViewKPI
+  usecase "Xem doanh thu\n7 ngay gan nhat" as UC_ViewRevenueChart
+  usecase "Xem don moi / don cho xu ly" as UC_ViewOrderSummary
+  usecase "Xem san pham sap het hang" as UC_ViewLowStock
+  usecase "Xem feedback moi gan day" as UC_ViewRecentFeedback
+  usecase "Dieu huong nhanh toi\nDon hang / Kho / Feedback" as UC_QuickNavigate
+}
+
+Admin --> UC_ViewKPI
+Admin --> UC_ViewRevenueChart
+Admin --> UC_ViewOrderSummary
+Admin --> UC_ViewLowStock
+Admin --> UC_ViewRecentFeedback
+
+UC_ViewKPI ..> UC_QuickNavigate : <<extend>>
+UC_ViewOrderSummary ..> UC_QuickNavigate : <<extend>>
+UC_ViewLowStock ..> UC_QuickNavigate : <<extend>>
+UC_ViewRecentFeedback ..> UC_QuickNavigate : <<extend>>
+@enduml

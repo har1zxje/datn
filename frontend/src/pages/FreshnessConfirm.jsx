@@ -345,7 +345,7 @@ const FreshnessConfirm = () => {
               <div>
                 <h2 className="text-lg font-black text-slate-900">Đơn hàng đã được xác minh</h2>
                 <p className="mt-2 text-sm text-slate-600">
-                  FreshFood AI đã ghi nhận đủ phản hồi cho các sản phẩm trong đơn hàng này.
+                  NutriGro đã ghi nhận đủ phản hồi cho các sản phẩm trong đơn hàng này.
                 </p>
                 <button
                   type="button"

@@ -31,7 +31,7 @@ const Footer = () => {
           <div className="space-y-5 sm:col-span-2 lg:col-span-1">
             <div>
               <h2 className="text-2xl font-black tracking-tight text-white">
-                FreshFood <span className="text-emerald-400">AI</span>
+                NutriGro
               </h2>
               <p className="mt-1 text-xs font-semibold uppercase tracking-widest text-emerald-400">
                 Chọn tươi, mua gọn
@@ -123,7 +123,7 @@ const Footer = () => {
 
       <div className="border-t border-slate-900">
         <div className="fresh-container flex flex-col items-center justify-between gap-2 py-5 text-xs text-slate-500 sm:flex-row">
-          <p>© 2026 FreshFood AI.</p>
+          <p>© 2026 NutriGro.</p>
           <p>Thiết kế cho trải nghiệm mua thực phẩm tươi tại Việt Nam</p>
         </div>
       </div>

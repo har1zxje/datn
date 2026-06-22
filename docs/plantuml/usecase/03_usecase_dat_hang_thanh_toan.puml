@@ -1,0 +1,45 @@
+@startuml
+left to right direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam backgroundColor white
+skinparam ArrowColor #5B657A
+skinparam UsecaseBackgroundColor #F9FBFD
+skinparam UsecaseBorderColor #5B657A
+
+title NutriCare - Use Case Dat Hang Va Thanh Toan
+
+actor "Nguoi dung\n(da dang nhap)" as Member
+
+rectangle "Phan he dat hang va thanh toan" #EAF1FF {
+  usecase "Quan ly gio hang" as UC_Cart
+  usecase "Checkout / Dat hang" as UC_Checkout
+  usecase "Quan ly so dia chi\ngiao hang" as UC_Address
+  usecase "Ap dung voucher" as UC_Voucher
+  usecase "Dung diem tich luy" as UC_Points
+  usecase "Chon phuong thuc thanh toan" as UC_PaymentMethod
+  usecase "Xem QR thanh toan" as UC_ViewQR
+  usecase "Theo doi don hang\nca nhan" as UC_OrderHistory
+  usecase "Sua don cho\nxac nhan" as UC_EditOrder
+  usecase "Huy don cho\nxac nhan" as UC_CancelOrder
+  usecase "Tao don hang" as UC_CreateOrder
+  usecase "Kiem tra ton kho &\ntru ton kho" as UC_Stock
+}
+
+Member --> UC_Cart
+Member --> UC_Checkout
+Member --> UC_Address
+Member --> UC_OrderHistory
+
+UC_Cart ..> UC_Checkout : <<extend>>
+UC_Checkout ..> UC_Address : <<include>>
+UC_Checkout ..> UC_Voucher : <<extend>>
+UC_Checkout ..> UC_Points : <<extend>>
+UC_Checkout ..> UC_PaymentMethod : <<include>>
+UC_Checkout ..> UC_CreateOrder : <<include>>
+UC_CreateOrder ..> UC_Stock : <<include>>
+UC_PaymentMethod ..> UC_ViewQR : <<extend>>
+UC_OrderHistory ..> UC_EditOrder : <<extend>>
+UC_OrderHistory ..> UC_CancelOrder : <<extend>>
+@enduml

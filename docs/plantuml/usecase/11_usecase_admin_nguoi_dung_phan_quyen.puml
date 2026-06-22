@@ -1,0 +1,30 @@
+@startuml
+left to right direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam backgroundColor white
+skinparam ArrowColor #5B657A
+skinparam UsecaseBackgroundColor #F9FBFD
+skinparam UsecaseBorderColor #5B657A
+
+title NutriCare - Use Case Admin Nguoi Dung Va Phan Quyen
+
+actor "Quan tri vien" as Admin
+
+rectangle "Phan he quan ly nguoi dung" #F7ECFF {
+  usecase "Xem danh sach nguoi dung" as UC_ListUsers
+  usecase "Tim kiem / loc /\nphan trang nguoi dung" as UC_FilterUsers
+  usecase "Doi vai tro\ncustomer / staff / admin" as UC_UpdateRole
+  usecase "Xoa tai khoan\nkhong phai admin" as UC_DeleteUser
+  usecase "Xem don hang theo\nnguoi dung" as UC_ViewUserOrders
+}
+
+Admin --> UC_ListUsers
+Admin --> UC_UpdateRole
+Admin --> UC_DeleteUser
+Admin --> UC_ViewUserOrders
+
+UC_ListUsers ..> UC_FilterUsers : <<include>>
+UC_ListUsers ..> UC_ViewUserOrders : <<extend>>
+@enduml

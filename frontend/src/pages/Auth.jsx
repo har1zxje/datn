@@ -128,7 +128,7 @@ const Auth = () => {
           <div className="max-w-xl space-y-6">
             <span className="inline-flex items-center gap-2 rounded-full bg-white/90 px-4 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-emerald-700 ring-1 ring-emerald-100">
               <Sparkles size={12} />
-              Truy cập FreshFood AI
+              Truy cập NutriGro
             </span>
 
             <div className="space-y-3">

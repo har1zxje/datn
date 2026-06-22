@@ -24,7 +24,7 @@ const LIVE_REFRESH_INTERVAL_MS = 15000;
 const FALLBACK_PRODUCTS = [
   {
     id: 'fallback-wagyu',
-    name: 'Wagyu A5 FreshFood',
+    name: 'Wagyu A5 NutriGro',
     category: 'Thịt và hải sản',
     description: 'Thịt bò cao cấp cắt sẵn, phù hợp bữa tối gia đình.',
     price: 485000,

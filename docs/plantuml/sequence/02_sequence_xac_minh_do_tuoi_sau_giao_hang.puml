@@ -1,0 +1,162 @@
+@startuml
+title FreshFood AI - Sequence Xac Minh Do Tuoi Sau Giao Hang
+
+autonumber
+hide footbox
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam ArrowColor #5B657A
+skinparam ParticipantBorderColor #5B657A
+skinparam ParticipantBackgroundColor #F9FBFD
+skinparam ActorBorderColor #5B657A
+skinparam ActorBackgroundColor white
+skinparam LifeLineBorderColor #94A3B8
+skinparam LifeLineBackgroundColor #FFFFFF
+skinparam SequenceGroupBorderColor #94A3B8
+skinparam SequenceGroupBackgroundColor #F8FAFC
+skinparam NoteBackgroundColor #FFF7E8
+skinparam NoteBorderColor #D6B26E
+skinparam DefaultFontName Arial
+
+actor "Nguoi dung" as User
+participant "Frontend\nFreshnessConfirm.jsx" as FE
+participant "TFJS model\nproductVerification.js" as TFJS
+participant "Orders API\n/api/orders/{id}/freshness-confirmation" as OAPI
+participant "Freshness util\nannotate + notification" as FUTIL
+participant "Rewards helper\ncreate_generated_voucher()" as RHELP
+database "Database" as DB
+
+== Kiem tra dieu kien ==
+User -> FE: Mo don da giao va chon\n"Xac minh do tuoi"
+
+par Tai thong tin eligibility
+  FE -> OAPI: GET /api/orders/{id}/freshness-confirmation
+  activate OAPI
+  OAPI -> DB: SELECT order + order_items\nWHERE order_id + user_id khop
+  DB --> OAPI: Order + items
+  OAPI -> FUTIL: annotate_order_freshness_state(order, user_id)
+  activate FUTIL
+  FUTIL -> DB: SELECT freshness_reviews + verification_reports\ncua order hien tai
+  DB --> FUTIL: reported_order_item_ids
+  FUTIL --> OAPI: available / expired / completed
+  deactivate FUTIL
+  OAPI --> FE: EligibilityResponse
+  deactivate OAPI
+else Tai model AI tai frontend
+  FE -> TFJS: loadVerificationModel()
+  activate TFJS
+  TFJS --> FE: runtime model TFJS
+  deactivate TFJS
+end
+
+alt Don khong du dieu kien
+  FE --> User: Hien thi da het han\nhoac da xac minh truoc do
+else Don hop le
+  loop Moi san pham trong don
+    User -> FE: Chup / tai anh cho tung san pham
+    FE -> TFJS: analyzeVerificationImage(image)
+    activate TFJS
+    TFJS --> FE: predicted_label,\nfreshness, confidence
+    deactivate TFJS
+
+    alt AI doan dung
+      User -> FE: Xac nhan "AI doan dung"
+    else AI doan sai
+      User -> FE: Chon nhan dung,\nchon ket qua fresh/spoiled,\nnhap ghi chu neu can
+    end
+  end
+end
+
+== Gui xac minh ==
+User -> FE: Nhan "Gui xac nhan cho don hang"
+FE -> OAPI: POST /api/orders/{id}/freshness-confirmation\nmultipart(payload + images[])
+activate OAPI
+
+OAPI -> DB: SELECT order + order_items\nWHERE order_id + user_id khop
+DB --> OAPI: Order + items
+OAPI -> FUTIL: ensure_freshness_confirmation_is_available()
+activate FUTIL
+FUTIL -> DB: SELECT freshness_reviews + verification_reports\nkiem tra completed / expired
+DB --> FUTIL: freshness state
+FUTIL --> OAPI: OK / reject
+deactivate FUTIL
+
+OAPI -> OAPI: Parse payload JSON\nKiem tra so review = so order_items
+
+loop Moi review duoc gui len
+  OAPI -> OAPI: Kiem tra order_item_id,\nproduct_id, image_field
+  OAPI -> OAPI: Validate image upload\n(extension + magic bytes + size)
+  OAPI -> DB: INSERT freshness_reviews
+  DB --> OAPI: Review row pending flush
+end
+
+OAPI -> DB: FLUSH de bat duplicate submit
+DB --> OAPI: OK / IntegrityError
+
+alt Submit trung hoac vi pham unique(order_item_id, user_id)
+  OAPI -> DB: ROLLBACK
+  OAPI --> FE: 409 Don hang da duoc xac minh truoc do
+  deactivate OAPI
+else Hop le
+  OAPI -> OAPI: Tinh awarded_points\n(base + bonus dung/sai)
+
+  alt Co it nhat mot san pham co correct_result = spoiled
+    OAPI -> RHELP: create_generated_voucher(user_id,\nreason='freshness_spoiled_confirmation',\nsource_order_id=order.id)
+    activate RHELP
+    RHELP -> DB: SELECT existing voucher theo user + reason + order
+    DB --> RHELP: Existing voucher?
+
+    alt Chua co voucher
+      RHELP -> DB: INSERT generated_vouchers
+      DB --> RHELP: voucher.id + code
+    else Da ton tai voucher
+      RHELP --> OAPI: existing voucher
+    end
+
+    RHELP --> OAPI: Voucher object
+    deactivate RHELP
+    OAPI -> DB: UPDATE freshness_reviews\nSET reward_points, voucher_id
+  else Khong co san pham hong
+    OAPI -> DB: UPDATE freshness_reviews\nSET reward_points
+  end
+
+  OAPI -> DB: UPDATE users\nSET loyalty_points = loyalty_points + awarded_points
+
+  OAPI -> FUTIL: create_user_notification(loyalty_reward)
+  activate FUTIL
+  FUTIL -> DB: INSERT user_notifications
+  DB --> FUTIL: Notification saved
+  FUTIL --> OAPI: OK
+  deactivate FUTIL
+
+  alt Co voucher xin loi
+    OAPI -> FUTIL: create_user_notification(freshness_voucher)
+    activate FUTIL
+    FUTIL -> DB: INSERT user_notifications
+    DB --> FUTIL: Notification saved
+    FUTIL --> OAPI: OK
+    deactivate FUTIL
+  end
+
+  OAPI -> DB: COMMIT
+  DB --> OAPI: Persisted
+  OAPI --> FE: awarded_points,\nloyalty_points,\ncomplaint_available,\nvoucher?, reviews[]
+  deactivate OAPI
+end
+
+FE -> FE: updateUser(loyalty_points)\nsetSubmissionResult()
+
+alt complaint_available = true
+  FE --> User: Hien thi diem thuong,\nvoucher va nut tao refund / replacement
+else complaint_available = false
+  FE --> User: Hoan tat buoc hau kiem sau giao hang
+end
+
+note right of FE
+  Diem quan trong cua repo hien tai:
+  AI phan tich anh duoc chay tren frontend
+  bang TensorFlow.js, sau do frontend moi
+  gui ket qua tong hop len backend de luu.
+end note
+
+@enduml

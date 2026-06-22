@@ -52,7 +52,7 @@ const AdminShell = ({
           </span>
           {!compact && (
             <div className="min-w-0">
-              <p className="text-sm font-black uppercase tracking-[0.2em] text-emerald-700">FreshFood AI</p>
+              <p className="text-sm font-black uppercase tracking-[0.2em] text-emerald-700">NutriGro</p>
               <p className="text-xs font-medium text-slate-500">Khu vực quản trị</p>
             </div>
           )}

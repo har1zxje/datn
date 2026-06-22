@@ -1,0 +1,29 @@
+@startuml
+left to right direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam backgroundColor white
+skinparam ArrowColor #5B657A
+skinparam UsecaseBackgroundColor #F9FBFD
+skinparam UsecaseBorderColor #5B657A
+
+title NutriCare - Use Case Admin Feedback AI Scan
+
+actor "Quan tri vien" as Admin
+
+rectangle "Phan he feedback AI scan" #F7ECFF {
+  usecase "Xem danh sach feedback AI" as UC_ListFeedback
+  usecase "Loc theo trang thai /\nverdict / tim kiem" as UC_FilterFeedback
+  usecase "Xem chi tiet anh scan\nva du doan AI" as UC_ViewFeedbackDetail
+  usecase "Danh dau feedback da doc" as UC_MarkRead
+}
+
+Admin --> UC_ListFeedback
+Admin --> UC_ViewFeedbackDetail
+Admin --> UC_MarkRead
+
+UC_ListFeedback ..> UC_FilterFeedback : <<include>>
+UC_ListFeedback ..> UC_ViewFeedbackDetail : <<extend>>
+UC_ViewFeedbackDetail ..> UC_MarkRead : <<extend>>
+@enduml

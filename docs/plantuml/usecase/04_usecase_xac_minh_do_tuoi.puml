@@ -1,0 +1,41 @@
+@startuml
+left to right direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam backgroundColor white
+skinparam ArrowColor #5B657A
+skinparam UsecaseBackgroundColor #F9FBFD
+skinparam UsecaseBorderColor #5B657A
+
+title NutriCare - Use Case Xac Minh San Pham Sau Khi Nhan Hang
+
+actor "Nguoi dung\n(da dang nhap)" as Member
+actor "Mo hinh AI" as AIModel
+
+rectangle "Phan he xac minh do tuoi" #FFF7E8 {
+  usecase "Kiem tra don hang co du dieu kien\nxac minh sau giao hay khong" as UC_Eligibility
+  usecase "Tai len / chup anh\ncho tung san pham da giao" as UC_UploadImage
+  usecase "Phan tich anh bang AI" as UC_Analyze
+  usecase "Xac nhan AI du doan dung" as UC_ConfirmPrediction
+  usecase "Khai bao ket qua dung\nneu AI du doan sai" as UC_CorrectPrediction
+  usecase "Nhap ghi chu thu cong\nneu can" as UC_ManualNote
+  usecase "Gui xac minh cho\ntoan bo don hang" as UC_Submit
+  usecase "Nhan diem thuong\nxac minh" as UC_Reward
+  usecase "Tao voucher neu co\nsan pham hong" as UC_ApologyVoucher
+  usecase "Khoi tao yeu cau\nhoan tien / doi hang" as UC_CreateComplaint
+}
+
+Member --> UC_Submit
+AIModel --> UC_Analyze
+
+UC_Submit ..> UC_Eligibility : <<include>>
+UC_Submit ..> UC_UploadImage : <<include>>
+UC_Submit ..> UC_Analyze : <<include>>
+UC_Submit ..> UC_ConfirmPrediction : <<include>>
+UC_ConfirmPrediction ..> UC_CorrectPrediction : <<extend>>
+UC_ConfirmPrediction ..> UC_ManualNote : <<extend>>
+UC_Submit ..> UC_Reward : <<include>>
+UC_Submit ..> UC_ApologyVoucher : <<extend>>
+UC_CreateComplaint ..> UC_Submit : <<extend>>
+@enduml

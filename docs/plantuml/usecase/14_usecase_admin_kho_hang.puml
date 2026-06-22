@@ -1,0 +1,35 @@
+@startuml
+left to right direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam backgroundColor white
+skinparam ArrowColor #5B657A
+skinparam UsecaseBackgroundColor #F9FBFD
+skinparam UsecaseBorderColor #5B657A
+
+title NutriCare - Use Case Quan Ly Kho Hang
+
+actor "Nhan vien\nvan hanh" as Staff
+actor "Quan tri vien" as Admin
+
+Staff <|-- Admin
+
+rectangle "Phan he kho hang" #EAF1FF {
+  usecase "Xem ton kho hien tai" as UC_ViewInventory
+  usecase "Xem lich su giao dich kho" as UC_ViewTransactions
+  usecase "Nhap / xuat kho thu cong" as UC_ManualTransaction
+  usecase "Import giao dich kho\nbang Excel" as UC_ImportExcel
+  usecase "Export giao dich kho\nra Excel" as UC_ExportExcel
+  usecase "Kiem tra ton kho\ntruoc khi xuat" as UC_ValidateStock
+}
+
+Staff --> UC_ViewInventory
+Staff --> UC_ViewTransactions
+Staff --> UC_ManualTransaction
+Staff --> UC_ImportExcel
+Staff --> UC_ExportExcel
+
+UC_ManualTransaction ..> UC_ValidateStock : <<include>>
+UC_ImportExcel ..> UC_ValidateStock : <<include>>
+@enduml

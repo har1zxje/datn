@@ -1,4 +1,4 @@
-﻿import { getProducts } from './api';
+import { getProducts } from './api';
 
 const N8N_WEBHOOK_URL = import.meta.env.VITE_N8N_CHAT_WEBHOOK_URL;
 const MAX_PRODUCTS_IN_CONTEXT = 30;
@@ -15,9 +15,9 @@ const recipePersona = {
   role: 'culinary_expert',
   language: 'vi-VN',
   rules: [
-    'Act as a practical Vietnamese culinary expert for FreshFood AI customers.',
+    'Act as a practical Vietnamese culinary expert for NutriGro customers.',
     'Do not invent recipes. For recipes, use trusted recipe APIs or reputable cooking sources only and include source links when available.',
-    'If a recipe ingredient matches an available FreshFood product, return a products array with id, name, price, unit, image_url, url and match_label.',
+    'If a recipe ingredient matches an available NutriGro product, return a products array with id, name, price, unit, image_url, url and match_label.',
     'Keep answers concise, useful, and safe for home cooking.',
     'When uncertain, ask a clarifying question instead of guessing.',
   ],
@@ -96,12 +96,12 @@ const normalizeSuggestedProduct = (product = {}, matchLabel = '') => {
   const price = Number(product.price ?? product.discount_price ?? 0);
   return {
     id: product.id ?? product.product_id ?? product.sku ?? product.name,
-    name: product.name || product.product_name || 'Sản phẩm FreshFood',
+    name: product.name || product.product_name || 'Sản phẩm NutriGro',
     price,
     priceText: product.priceText || product.price_text || formatPrice(price),
     unit: product.unit || '',
-    img: product.img || product.image_url || 'https://placehold.co/160x160/f8fafc/166534?text=FreshFood',
-    image_url: product.image_url || product.img || 'https://placehold.co/160x160/f8fafc/166534?text=FreshFood',
+    img: product.img || product.image_url || 'https://placehold.co/160x160/f8fafc/166534?text=NutriGro',
+    image_url: product.image_url || product.img || 'https://placehold.co/160x160/f8fafc/166534?text=NutriGro',
     url: productUrl(product),
     match_label: product.match_label || matchLabel,
     category: product.category || product.category_name || '',
@@ -359,7 +359,7 @@ export const sendChatMessage = async ({ message, user_context = {}, signal } = {
     console.error('n8n webhook error', { correlationId, error });
     return {
       content:
-        'Tôi chưa kết nối được n8n để lấy công thức từ nguồn uy tín. Bạn có thể thử lại sau ít phút; bên dưới là các sản phẩm FreshFood có thể liên quan đến câu hỏi của bạn.',
+        'Tôi chưa kết nối được n8n để lấy công thức từ nguồn uy tín. Bạn có thể thử lại sau ít phút; bên dưới là các sản phẩm NutriGro có thể liên quan đến câu hỏi của bạn.',
       products: localProductSuggestions,
       payload: {
         ...payload,
@@ -372,7 +372,7 @@ export const sendChatMessage = async ({ message, user_context = {}, signal } = {
     console.error('n8n webhook non-200', { correlationId, status: response.status });
     return {
       content:
-        'Tôi chưa kết nối được n8n để lấy công thức từ nguồn uy tín. Bạn có thể thử lại sau ít phút; bên dưới là các sản phẩm FreshFood có thể liên quan đến câu hỏi của bạn.',
+        'Tôi chưa kết nối được n8n để lấy công thức từ nguồn uy tín. Bạn có thể thử lại sau ít phút; bên dưới là các sản phẩm NutriGro có thể liên quan đến câu hỏi của bạn.',
       products: localProductSuggestions,
       payload,
     };
@@ -392,5 +392,4 @@ export const sendChatMessage = async ({ message, user_context = {}, signal } = {
 };
 
 export default sendChatMessage;
-
 

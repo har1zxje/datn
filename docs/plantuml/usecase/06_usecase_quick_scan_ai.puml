@@ -1,0 +1,32 @@
+@startuml
+left to right direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam backgroundColor white
+skinparam ArrowColor #5B657A
+skinparam UsecaseBackgroundColor #F9FBFD
+skinparam UsecaseBorderColor #5B657A
+
+title NutriCare - Use Case Quick Scan AI
+
+actor "Nguoi dung\n(chua dang nhap)" as Guest
+actor "Nguoi dung\n(da dang nhap)" as Member
+actor "Mo hinh AI" as AIModel
+
+rectangle "Phan he quick scan AI" #EAF7EE {
+  usecase "Bat camera / tai anh" as UC_InputImage
+  usecase "Quet nhanh do tuoi" as UC_QuickScan
+  usecase "Xem canh bao\ncan duyet thu cong" as UC_ManualReview
+  usecase "Gui feedback du doan AI" as UC_SendFeedback
+}
+
+Guest --> UC_QuickScan
+Member --> UC_QuickScan
+Member --> UC_SendFeedback
+AIModel --> UC_QuickScan
+
+UC_QuickScan ..> UC_InputImage : <<include>>
+UC_QuickScan ..> UC_ManualReview : <<extend>>
+UC_SendFeedback ..> UC_QuickScan : <<extend>>
+@enduml

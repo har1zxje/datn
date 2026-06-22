@@ -1,0 +1,28 @@
+@startuml
+left to right direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam backgroundColor white
+skinparam ArrowColor #5B657A
+skinparam UsecaseBackgroundColor #F9FBFD
+skinparam UsecaseBorderColor #5B657A
+
+title NutriCare - Use Case Admin Bao Cao Xac Minh Sau Giao
+
+actor "Quan tri vien" as Admin
+
+rectangle "Phan he bao cao xac minh sau giao" #F7ECFF {
+  usecase "Xem danh sach bao cao\nxac minh sau giao" as UC_ListReports
+  usecase "Loc theo ngay / do chinh xac /\nvoucher / ket qua dung sai" as UC_FilterReports
+  usecase "Xem thong tin reward /\nvoucher / anh xac minh" as UC_ViewReportDetail
+  usecase "Export bao cao ra Excel" as UC_ExportReports
+}
+
+Admin --> UC_ListReports
+Admin --> UC_ViewReportDetail
+Admin --> UC_ExportReports
+
+UC_ListReports ..> UC_FilterReports : <<include>>
+UC_ListReports ..> UC_ViewReportDetail : <<extend>>
+@enduml

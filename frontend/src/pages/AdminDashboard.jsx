@@ -1107,6 +1107,7 @@ const AdminDashboard = () => {
             setProductPage={setProductPage}
             setProductPageSize={setProductPageSize}
             catalogLoading={catalogLoading}
+            loading={loading}
             featuredCount={featuredCount}
             productInlineLoadingId={productInlineLoadingId}
             openWarehouseCreateSection={openWarehouseCreateSection}
@@ -1114,6 +1115,7 @@ const AdminDashboard = () => {
             openEditProductModal={openEditProductModal}
             handleProductBadgeChange={handleProductBadgeChange}
             handleProductFeaturedToggle={handleProductFeaturedToggle}
+            handleDeleteProductItem={handleDeleteProductItem}
           />
         )}
 
