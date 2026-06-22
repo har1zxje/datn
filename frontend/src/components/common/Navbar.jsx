@@ -183,11 +183,11 @@ const Navbar = () => {
             <Link
               to="/"
               className="flex shrink-0 items-center gap-3 rounded-2xl px-1 py-1 text-slate-950 outline-none transition-all duration-300 hover:text-emerald-700 focus-visible:ring-2 focus-visible:ring-emerald-300"
-              aria-label="FreshFood AI - Trang chủ"
+              aria-label="NutriGro - Trang chủ"
             >
               <BrandMark />
               <span className="leading-tight">
-                <span className="block text-base font-black tracking-tight md:text-lg">FreshFood AI</span>
+                <span className="block text-base font-black tracking-tight md:text-lg">NutriGro</span>
                 <span className="hidden text-xs font-semibold text-emerald-100 sm:block">Mua tươi, kiểm tra rõ</span>
               </span>
             </Link>
@@ -488,7 +488,7 @@ const Navbar = () => {
             <div className="flex items-center justify-between border-b border-slate-100 bg-emerald-50 px-5 py-4">
               <Link to="/" onClick={() => setShowMobileMenu(false)} className="flex items-center gap-2">
                 <BrandMark size="sm" />
-                <span className="font-black text-emerald-900">FreshFood AI</span>
+                <span className="font-black text-emerald-900">NutriGro</span>
               </Link>
               <button
                 type="button"

@@ -1,0 +1,40 @@
+@startuml
+left to right direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam backgroundColor white
+skinparam ArrowColor #5B657A
+skinparam UsecaseBackgroundColor #F9FBFD
+skinparam UsecaseBorderColor #5B657A
+
+title NutriCare - Use Case Tong Quan Khoi Quan Tri
+
+actor "Nhan vien\nvan hanh" as Staff
+actor "Quan tri vien" as Admin
+
+Staff <|-- Admin
+
+rectangle "Phan he quan tri admin" #F7ECFF {
+  usecase "Dashboard thong ke" as UC_Dashboard
+  usecase "Quan ly nguoi dung\n& phan quyen" as UC_ManageUsers
+  usecase "Quan ly don hang" as UC_ManageOrders
+  usecase "Quan ly san pham" as UC_ManageProducts
+  usecase "Quan ly kho hang" as UC_ManageWarehouse
+  usecase "Theo doi feedback AI scan" as UC_AIFeedback
+  usecase "Bao cao xac minh\nsau giao hang" as UC_FreshnessReports
+  usecase "Cai dat QR thanh toan" as UC_PaymentQR
+  usecase "Xu ly khieu nai do tuoi" as UC_Complaints
+}
+
+Staff --> UC_ManageOrders
+Staff --> UC_ManageProducts
+Staff --> UC_ManageWarehouse
+
+Admin --> UC_Dashboard
+Admin --> UC_ManageUsers
+Admin --> UC_AIFeedback
+Admin --> UC_FreshnessReports
+Admin --> UC_PaymentQR
+Admin --> UC_Complaints
+@enduml

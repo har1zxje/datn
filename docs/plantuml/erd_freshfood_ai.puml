@@ -1,0 +1,329 @@
+@startuml
+title FreshFood AI - Entity Relationship Diagram
+
+left to right direction
+hide methods
+hide stereotypes
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam linetype ortho
+skinparam roundcorner 10
+skinparam packageStyle rectangle
+skinparam DefaultFontName Arial
+skinparam ArrowColor #6B7280
+skinparam PackageBorderColor #94A3B8
+skinparam PackageFontStyle bold
+skinparam EntityBorderColor #475569
+skinparam EntityBackgroundColor #F8FAFC
+skinparam EntityFontColor #0F172A
+
+package "Core commerce" {
+  entity "users" as users {
+    * id : integer <<PK>>
+    --
+    username : string <<UQ>>
+    email : string <<UQ>>
+    hashed_password : string
+    role : enum(user_role)
+    loyalty_points : integer
+    voucher_balance : decimal(12,2)
+    is_active : boolean
+    is_verified : boolean
+    token_version : integer
+    created_at : datetime
+  }
+
+  entity "categories" as categories {
+    * id : integer <<PK>>
+    --
+    name : string <<UQ>>
+    slug : string <<UQ>>
+    is_active : boolean
+    order : integer
+  }
+
+  entity "products" as products {
+    * id : integer <<PK>>
+    --
+    category_id : integer <<FK>>
+    name : string
+    slug : string <<UQ>>
+    sku : string <<UQ>>
+    price : decimal(10,2)
+    discount_price : decimal(10,2)?
+    quantity : integer
+    unit : string
+    stock_status : string
+    ai_supported : boolean
+    ai_class_name : string?
+  }
+
+  entity "orders" as orders {
+    * id : integer <<PK>>
+    --
+    order_number : string <<UQ>>
+    user_id : integer <<FK>>
+    replacement_parent_order_id : integer <<FK, nullable>>
+    status : enum(order_status)
+    payment_status : enum(payment_status)
+    payment_method : string
+    order_type : string
+    subtotal : decimal(12,2)
+    discount : decimal(10,2)
+    total : decimal(12,2)
+    voucher_code : string?
+    points_redeemed : integer
+    delivered_at : datetime?
+    created_at : datetime
+  }
+
+  entity "order_items" as order_items {
+    * id : integer <<PK>>
+    --
+    order_id : integer <<FK>>
+    product_id : integer <<FK>>
+    quantity : integer
+    price_at_purchase : decimal(10,2)
+    subtotal : decimal(12,2)
+    created_at : datetime
+  }
+
+  entity "reviews" as reviews {
+    * id : integer <<PK>>
+    --
+    product_id : integer <<FK>>
+    user_id : integer <<FK>>
+    rating : integer
+    title : string?
+    comment : text?
+    is_verified_purchase : boolean
+    is_approved : boolean
+    helpful_count : integer
+    created_at : datetime
+  }
+
+  entity "delivery_profiles" as delivery_profiles {
+    * id : integer <<PK>>
+    --
+    user_id : integer <<FK>>
+    full_name : string
+    phone : string
+    address : text
+    city : string
+    is_default : boolean
+  }
+
+  entity "generated_vouchers" as generated_vouchers {
+    * id : integer <<PK>>
+    --
+    user_id : integer <<FK>>
+    source_order_id : integer <<FK, nullable>>
+    code : string <<UQ>>
+    reason : string
+    title : string
+    created_at : datetime
+  }
+}
+
+package "AI and post-delivery" {
+  entity "scan_results" as scan_results {
+    * id : integer <<PK>>
+    --
+    user_id : integer <<FK>>
+    product_id : integer <<FK, nullable>>
+    image_url : string?
+    status : enum(scan_status)
+    freshness_score : float?
+    freshness_level : enum(freshness_level)?
+    ai_confidence : float?
+    scan_method : string?
+    processing_time : float?
+    created_at : datetime
+  }
+
+  entity "scan_feedback_events" as scan_feedback_events {
+    * id : integer <<PK>>
+    --
+    scan_id : integer <<FK, nullable>>
+    user_id : integer <<FK>>
+    source : string
+    predicted_label : string
+    predicted_status : string
+    predicted_confidence : float
+    is_correct : boolean
+    corrected_label : string?
+    corrected_status : string?
+    is_read : boolean
+    created_at : datetime
+  }
+
+  entity "freshness_reviews" as freshness_reviews {
+    * id : integer <<PK>>
+    --
+    order_id : integer <<FK>>
+    order_item_id : integer <<FK>>
+    user_id : integer <<FK>>
+    product_id : integer <<FK>>
+    voucher_id : integer <<FK, nullable>>
+    image_url : text
+    predicted_label : string?
+    predicted_result : string?
+    is_prediction_correct : boolean?
+    correct_label : string?
+    correct_result : string?
+    reward_points : integer
+    manual_rating : string?
+    created_at : datetime
+  }
+
+  entity "freshness_complaints" as freshness_complaints {
+    * id : integer <<PK>>
+    --
+    order_id : integer <<FK>>
+    user_id : integer <<FK>>
+    replacement_order_id : integer <<FK, nullable>>
+    complaint_type : enum(complaint_type)
+    refund_amount : decimal(12,2)
+    resolution_status : enum(complaint_resolution_status)
+    notes : text?
+    created_at : datetime
+  }
+
+  entity "verification_reports" as verification_reports {
+    * id : integer <<PK>>
+    --
+    order_id : integer <<FK>>
+    order_item_id : integer <<FK>>
+    user_id : integer <<FK>>
+    product_id : integer <<FK>>
+    product_name : string
+    prediction_label : string?
+    prediction_freshness : string?
+    prediction_confidence : float?
+    scan_correct : boolean?
+    user_feedback : boolean?
+    points_awarded : integer
+    voucher_code : string?
+    is_read : boolean
+    created_at : datetime
+  }
+
+  entity "ood_logs" as ood_logs {
+    * id : integer <<PK>>
+    --
+    user_id : integer <<FK, nullable>>
+    order_id : integer <<FK, nullable>>
+    max_confidence : float
+    created_at : datetime
+  }
+}
+
+package "Operations and audit" {
+  entity "stock_transactions" as stock_transactions {
+    * id : integer <<PK>>
+    --
+    product_id : integer <<FK>>
+    user_id : integer <<FK>>
+    type : enum(transaction_type)
+    quantity : integer
+    note : text?
+    transaction_date : datetime?
+    created_at : datetime
+  }
+
+  entity "user_notifications" as user_notifications {
+    * id : integer <<PK>>
+    --
+    user_id : integer <<FK>>
+    order_id : integer <<FK, nullable>>
+    title : string
+    message : text
+    notification_type : string
+    is_read : boolean
+    expires_at : datetime?
+    created_at : datetime
+  }
+
+  entity "payment_qr_settings" as payment_qr_settings {
+    * id : integer <<PK>>
+    --
+    updated_by_user_id : integer <<FK, nullable>>
+    provider_name : string
+    image_url : text
+    created_at : datetime
+    updated_at : datetime
+  }
+
+  entity "audit_logs" as audit_logs {
+    * id : integer <<PK>>
+    --
+    user_id : integer <<FK, nullable>>
+    action : string
+    resource_type : string
+    resource_id : integer?
+    details : json?
+    ip_address : string?
+    user_agent : string?
+    created_at : datetime
+  }
+}
+
+categories ||--o{ products
+users ||--o{ orders
+orders ||--o{ order_items
+products ||--o{ order_items
+users ||--o{ reviews
+products ||--o{ reviews
+users ||--o{ delivery_profiles
+users ||--o{ generated_vouchers
+orders |o--o{ generated_vouchers : source_order_id
+orders ||--o{ orders : replacement_parent_order_id
+
+users ||--o{ scan_results
+products |o--o{ scan_results : product_id
+scan_results |o--o{ scan_feedback_events : scan_id
+users ||--o{ scan_feedback_events
+
+orders ||--o{ freshness_reviews
+order_items ||--o{ freshness_reviews
+users ||--o{ freshness_reviews
+products ||--o{ freshness_reviews
+generated_vouchers |o--o{ freshness_reviews : voucher_id
+
+orders ||--o{ freshness_complaints : order_id
+users ||--o{ freshness_complaints
+orders |o--o{ freshness_complaints : replacement_order_id
+
+orders ||--o{ verification_reports
+order_items ||--o{ verification_reports
+users ||--o{ verification_reports
+products ||--o{ verification_reports
+
+users |o--o{ ood_logs
+orders |o--o{ ood_logs
+
+products ||--o{ stock_transactions
+users ||--o{ stock_transactions
+users ||--o{ user_notifications
+orders |o--o{ user_notifications
+users |o--o{ payment_qr_settings : updated_by_user_id
+users |o--o{ audit_logs
+
+note bottom of freshness_reviews
+  Unique constraint:
+  (order_item_id, user_id)
+end note
+
+legend right
+  Source of truth:
+  - backend/models.py
+  - Alembic migrations in backend/migrations/versions
+
+  Notes:
+  - '?' means nullable or optional in the ORM
+  - Enum columns are stored as strings in SQLAlchemy
+  - freshfood_test.db in repo is sample data only
+    and may not include the latest tables/columns
+endlegend
+
+@enduml

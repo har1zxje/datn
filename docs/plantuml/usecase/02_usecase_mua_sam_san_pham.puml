@@ -1,0 +1,43 @@
+@startuml
+left to right direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam backgroundColor white
+skinparam ArrowColor #5B657A
+skinparam UsecaseBackgroundColor #F9FBFD
+skinparam UsecaseBorderColor #5B657A
+
+title NutriCare - Use Case Mua Sam San Pham
+
+actor "Nguoi dung\n(chua dang nhap)" as Guest
+actor "Nguoi dung\n(da dang nhap)" as Member
+
+rectangle "Phan he san pham va mua sam" #EAF7EE {
+  usecase "Duyet san pham" as UC_ListProducts
+  usecase "Loc / tim kiem san pham" as UC_SearchProducts
+  usecase "Xem danh muc\nva san pham noi bat" as UC_Categories
+  usecase "Xem chi tiet san pham" as UC_ProductDetail
+  usecase "Xem diem do tuoi\n& phan hoi cong khai" as UC_FreshnessReviews
+  usecase "Danh gia san pham" as UC_ProductReview
+  usecase "Quan ly yeu thich" as UC_Favorites
+  usecase "Them san pham\nvao gio hang" as UC_AddToCart
+}
+
+Guest --> UC_ListProducts
+Guest --> UC_Categories
+Guest --> UC_ProductDetail
+Guest --> UC_AddToCart
+Guest --> UC_Favorites
+
+Member --> UC_ListProducts
+Member --> UC_ProductReview
+Member --> UC_Favorites
+Member --> UC_AddToCart
+
+UC_ListProducts ..> UC_SearchProducts : <<include>>
+UC_ListProducts ..> UC_Categories : <<include>>
+UC_ProductDetail ..> UC_FreshnessReviews : <<include>>
+UC_ProductDetail ..> UC_AddToCart : <<extend>>
+UC_Favorites ..> UC_ListProducts : <<extend>>
+@enduml

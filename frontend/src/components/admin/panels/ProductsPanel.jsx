@@ -1,4 +1,4 @@
-import { Edit3, Eye, ImagePlus, Loader2, PackagePlus, Search } from 'lucide-react';
+import { Edit3, Eye, ImagePlus, Loader2, PackagePlus, Search, Trash2 } from 'lucide-react';
 import { formatCompactNumber, formatMoney } from '../../../utils/admin/formatters';
 import { getStockBadge, getStockRowTint } from '../../../utils/admin/stockHelpers';
 import { mapProductToCategoryId } from '../../../data/categorySystem';
@@ -84,6 +84,18 @@ const InlineActionStatus = ({ active }) => {
   return null;
 };
 
+const DeleteProductButton = ({ product, disabled, onDelete, className = '' }) => (
+  <button
+    type="button"
+    onClick={() => onDelete(product.id, product.name)}
+    disabled={disabled}
+    className={`inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 px-4 py-2.5 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60 ${className}`}
+  >
+    <Trash2 size={14} />
+    Xóa
+  </button>
+);
+
 const ProductsPanel = ({
   productSearch,
   setProductSearch,
@@ -99,6 +111,7 @@ const ProductsPanel = ({
   setProductPage,
   setProductPageSize,
   catalogLoading,
+  loading = false,
   featuredCount,
   productInlineLoadingId,
   openWarehouseCreateSection,
@@ -106,6 +119,7 @@ const ProductsPanel = ({
   openEditProductModal,
   handleProductBadgeChange,
   handleProductFeaturedToggle,
+  handleDeleteProductItem,
 }) => (
   <section className="space-y-6">
     <div className="sticky top-[4.5rem] z-20 rounded-[28px] border border-[color:var(--line-soft)] bg-[rgba(252,253,252,0.96)] p-4 shadow-[var(--shadow-soft)] backdrop-blur">
@@ -199,6 +213,7 @@ const ProductsPanel = ({
           const categoryLabel = getCategoryLabel(product, categoryDirectory);
           const isUpdating = productInlineLoadingId === product.id;
           const limitReached = featuredCount >= FEATURED_PRODUCT_LIMIT;
+          const isActionDisabled = loading || isUpdating;
 
           return (
             <article
@@ -272,11 +287,18 @@ const ProductsPanel = ({
                 <button
                   type="button"
                   onClick={() => openEditProductModal(product)}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white opacity-100 transition md:opacity-0 md:group-hover:opacity-100"
+                  disabled={isActionDisabled}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white opacity-100 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 md:opacity-0 md:group-hover:opacity-100"
                 >
                   <Edit3 size={14} />
                   Sửa thông tin
                 </button>
+                <DeleteProductButton
+                  product={product}
+                  disabled={isActionDisabled}
+                  onDelete={handleDeleteProductItem}
+                  className="mt-2 w-full bg-white/90 py-3 md:opacity-0 md:group-hover:opacity-100"
+                />
               </div>
             </article>
           );
@@ -295,6 +317,7 @@ const ProductsPanel = ({
             const categoryLabel = getCategoryLabel(product, categoryDirectory);
             const isUpdating = productInlineLoadingId === product.id;
             const limitReached = featuredCount >= FEATURED_PRODUCT_LIMIT;
+            const isActionDisabled = loading || isUpdating;
 
             return (
               <article
@@ -363,11 +386,12 @@ const ProductsPanel = ({
                   <InlineActionStatus active={isUpdating} />
                 </div>
 
-                <div className="mt-4 flex gap-2">
+                <div className="mt-4 grid gap-2 sm:grid-cols-3">
                   <button
                     type="button"
                     onClick={() => openProductPreview(product)}
-                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700"
+                    disabled={isActionDisabled}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <Eye size={14} />
                     Xem
@@ -375,11 +399,17 @@ const ProductsPanel = ({
                   <button
                     type="button"
                     onClick={() => openEditProductModal(product)}
-                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white"
+                    disabled={isActionDisabled}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <Edit3 size={14} />
                     Sửa thông tin
                   </button>
+                  <DeleteProductButton
+                    product={product}
+                    disabled={isActionDisabled}
+                    onDelete={handleDeleteProductItem}
+                  />
                 </div>
               </article>
             );
@@ -410,6 +440,7 @@ const ProductsPanel = ({
                   const isUpdating = productInlineLoadingId === product.id;
                   const promotionLabel = getPromotionLabel(product);
                   const limitReached = featuredCount >= FEATURED_PRODUCT_LIMIT;
+                  const isActionDisabled = loading || isUpdating;
 
                   return (
                     <tr key={product.id} className={`transition hover:bg-slate-50/70 ${getStockRowTint(qty, threshold)}`}>
@@ -481,7 +512,8 @@ const ProductsPanel = ({
                           <button
                             type="button"
                             onClick={() => openProductPreview(product)}
-                            className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700"
+                            disabled={isActionDisabled}
+                            className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             <Eye size={14} />
                             Xem
@@ -489,11 +521,18 @@ const ProductsPanel = ({
                           <button
                             type="button"
                             onClick={() => openEditProductModal(product)}
-                            className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+                            disabled={isActionDisabled}
+                            className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             <Edit3 size={14} />
                             Sửa thông tin
                           </button>
+                          <DeleteProductButton
+                            product={product}
+                            disabled={isActionDisabled}
+                            onDelete={handleDeleteProductItem}
+                            className="px-4 py-2"
+                          />
                         </div>
                       </td>
                     </tr>

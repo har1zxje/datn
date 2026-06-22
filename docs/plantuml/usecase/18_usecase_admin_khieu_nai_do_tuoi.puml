@@ -1,0 +1,29 @@
+@startuml
+left to right direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam backgroundColor white
+skinparam ArrowColor #5B657A
+skinparam UsecaseBackgroundColor #F9FBFD
+skinparam UsecaseBorderColor #5B657A
+
+title NutriCare - Use Case Admin Khieu Nai Do Tuoi
+
+actor "Quan tri vien" as Admin
+
+rectangle "Phan he xu ly khieu nai do tuoi" #F7ECFF {
+  usecase "Xem danh sach khieu nai do tuoi" as UC_ListComplaints
+  usecase "Loc theo trang thai\nxu ly" as UC_FilterComplaints
+  usecase "Phe duyet khieu nai\nhoan tien" as UC_ApproveComplaint
+  usecase "Tu choi khieu nai" as UC_RejectComplaint
+  usecase "Cong voucher hoan tien\nvao tai khoan user" as UC_RefundVoucher
+}
+
+Admin --> UC_ListComplaints
+Admin --> UC_ApproveComplaint
+Admin --> UC_RejectComplaint
+
+UC_ListComplaints ..> UC_FilterComplaints : <<include>>
+UC_ApproveComplaint ..> UC_RefundVoucher : <<include>>
+@enduml

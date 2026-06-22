@@ -1,0 +1,37 @@
+@startuml
+left to right direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam backgroundColor white
+skinparam ArrowColor #5B657A
+skinparam UsecaseBackgroundColor #F9FBFD
+skinparam UsecaseBorderColor #5B657A
+
+title NutriCare - Use Case Khieu Nai Chat Luong
+
+actor "Nguoi dung\n(da dang nhap)" as Member
+actor "Quan tri vien" as Admin
+
+rectangle "Phan he khieu nai chat luong" #FDEEF0 {
+  usecase "Gui yeu cau\nhoan tien" as UC_RefundRequest
+  usecase "Gui yeu cau\ndoi hang" as UC_ReplacementRequest
+  usecase "Theo doi trang thai khieu nai" as UC_TrackComplaint
+  usecase "Kiem tra ket qua\nxac minh do tuoi" as UC_VerifyEvidence
+  usecase "Dua ve trang thai\ncho duyet" as UC_PendingReview
+  usecase "Tao don doi hang" as UC_CreateReplacementOrder
+  usecase "Phe duyet / Tu choi\nkhieu nai" as UC_ReviewRefund
+  usecase "Cong voucher hoan tien" as UC_RefundVoucher
+}
+
+Member --> UC_RefundRequest
+Member --> UC_ReplacementRequest
+Member --> UC_TrackComplaint
+Admin --> UC_ReviewRefund
+
+UC_RefundRequest ..> UC_VerifyEvidence : <<include>>
+UC_RefundRequest ..> UC_PendingReview : <<include>>
+UC_ReplacementRequest ..> UC_VerifyEvidence : <<include>>
+UC_ReplacementRequest ..> UC_CreateReplacementOrder : <<include>>
+UC_ReviewRefund ..> UC_RefundVoucher : <<extend>>
+@enduml

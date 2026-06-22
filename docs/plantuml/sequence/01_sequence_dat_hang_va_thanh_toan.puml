@@ -1,0 +1,142 @@
+@startuml
+title FreshFood AI - Sequence Dat Hang Va Thanh Toan
+
+autonumber
+hide footbox
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam ArrowColor #5B657A
+skinparam ParticipantBorderColor #5B657A
+skinparam ParticipantBackgroundColor #F9FBFD
+skinparam ActorBorderColor #5B657A
+skinparam ActorBackgroundColor white
+skinparam LifeLineBorderColor #94A3B8
+skinparam LifeLineBackgroundColor #FFFFFF
+skinparam SequenceGroupBorderColor #94A3B8
+skinparam SequenceGroupBackgroundColor #F8FAFC
+skinparam NoteBackgroundColor #FFF7E8
+skinparam NoteBorderColor #D6B26E
+skinparam DefaultFontName Arial
+
+actor "Nguoi dung" as User
+participant "Frontend\nCart.jsx" as FE
+participant "Delivery API\n/api/delivery-profiles" as DP
+participant "Rewards API\n/api/vouchers/mine" as VAPI
+participant "Payment QR API\n/api/payment-qr" as QRAPI
+participant "Orders API\n/api/orders" as OAPI
+participant "Rewards helper\nresolve_active_voucher()" as RHELP
+participant "Inventory helper\nrecord_stock_transaction()" as IHELP
+database "Database" as DB
+
+== Tai du lieu checkout ==
+User -> FE: Mo trang gio hang / checkout
+
+par Tai so dia chi giao hang
+  FE -> DP: GET /api/delivery-profiles
+  activate DP
+  DP -> DB: SELECT delivery_profiles\nWHERE user_id = current_user.id
+  DB --> DP: profiles[]
+  DP --> FE: Danh sach dia chi
+  deactivate DP
+else Tai voucher kha dung
+  FE -> VAPI: GET /api/vouchers/mine
+  activate VAPI
+  VAPI -> DB: SELECT generated_vouchers\n+ orders da dung voucher
+  DB --> VAPI: vouchers + used_codes
+  VAPI --> FE: Voucher chua dung, chua het han
+  deactivate VAPI
+else Tai QR thanh toan
+  FE -> QRAPI: GET /api/payment-qr
+  activate QRAPI
+  QRAPI -> DB: SELECT latest payment_qr_settings
+  DB --> QRAPI: QR image + provider
+  QRAPI --> FE: Thong tin ma QR
+  deactivate QRAPI
+end
+
+== Dat hang ==
+User -> FE: Chon san pham, dia chi,\npayment method, voucher?, points?
+User -> FE: Nhan "Dat hang"
+FE -> OAPI: POST /api/orders
+activate OAPI
+
+OAPI -> OAPI: Kiem tra order_create.items khong rong
+
+loop Moi san pham duoc dat
+  OAPI -> DB: SELECT product active by product_id
+  DB --> OAPI: Product
+
+  alt Product khong ton tai
+    OAPI --> FE: 404 Khong tim thay san pham
+    deactivate OAPI
+  else Product hop le
+    OAPI -> DB: UPDATE products\nSET quantity = quantity - requested\nWHERE quantity >= requested
+    DB --> OAPI: rowcount
+
+    alt Het hang / ton kho khong du
+      OAPI -> DB: ROLLBACK
+      OAPI --> FE: 400 Ton kho khong du
+      deactivate OAPI
+    else Tru kho thanh cong
+      OAPI -> DB: REFRESH product
+      OAPI -> IHELP: record_stock_transaction(EXPORT)
+      activate IHELP
+      IHELP -> DB: INSERT stock_transactions
+      DB --> IHELP: Transaction saved
+      IHELP --> OAPI: OK
+      deactivate IHELP
+    end
+  end
+end
+
+OAPI -> OAPI: Tinh subtotal, tax, shipping_fee
+
+alt Co voucher_code
+  OAPI -> RHELP: resolve_active_voucher(user_id, voucher_code, order_total)
+  activate RHELP
+  RHELP -> DB: SELECT generated_vouchers\n+ kiem tra order da dung voucher
+  DB --> RHELP: Voucher + used_order?
+
+  alt Voucher khong hop le / het han / da dung
+    RHELP --> OAPI: HTTPException 4xx
+    deactivate RHELP
+    OAPI --> FE: Loi voucher
+    deactivate OAPI
+  else Voucher hop le
+    RHELP --> OAPI: voucher + voucher_discount
+    deactivate RHELP
+  end
+else Khong dung voucher
+  OAPI -> OAPI: voucher_discount = 0
+end
+
+alt So diem vuot qua diem hien co\nhoac vuot qua gia tri don
+  OAPI --> FE: 400 Diem su dung khong hop le
+  deactivate OAPI
+else Diem hop le
+  OAPI -> OAPI: total_discount = voucher_discount + points_redeemed
+  OAPI -> DB: INSERT orders
+  OAPI -> DB: INSERT order_items
+
+  alt points_redeemed > 0
+    OAPI -> DB: UPDATE users\nSET loyalty_points = loyalty_points - points_redeemed
+    DB --> OAPI: User updated
+  end
+
+  OAPI -> DB: COMMIT
+  DB --> OAPI: Order + items persisted
+  OAPI --> FE: OrderDetail
+  deactivate OAPI
+end
+
+FE -> FE: removeItems(selectedIds)\nupdateUser(loyalty_points)\nnavigate('/profile', tab='orders')
+FE --> User: Hien thi thong bao dat hang thanh cong
+
+note right of OAPI
+  Logic dat hang thuc te trong repo:
+  - Tru kho theo atomic UPDATE
+  - Ghi stock_transactions cho tung item
+  - Voucher va diem duoc xu ly ngay trong create_order()
+end note
+
+@enduml

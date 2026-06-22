@@ -1,0 +1,27 @@
+@startuml
+left to right direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam backgroundColor white
+skinparam ArrowColor #5B657A
+skinparam UsecaseBackgroundColor #F9FBFD
+skinparam UsecaseBorderColor #5B657A
+
+title NutriCare - Use Case Admin Cai Dat QR Thanh Toan
+
+actor "Quan tri vien" as Admin
+
+rectangle "Phan he cai dat QR thanh toan" #F7ECFF {
+  usecase "Xem QR thanh toan hien tai" as UC_ViewQR
+  usecase "Tai anh QR moi" as UC_UploadQR
+  usecase "Cap nhat ten nha cung cap /\nkenh thanh toan" as UC_UpdateProvider
+  usecase "Luu cau hinh QR thanh toan" as UC_SaveQR
+}
+
+Admin --> UC_ViewQR
+Admin --> UC_SaveQR
+
+UC_SaveQR ..> UC_UploadQR : <<extend>>
+UC_SaveQR ..> UC_UpdateProvider : <<extend>>
+@enduml

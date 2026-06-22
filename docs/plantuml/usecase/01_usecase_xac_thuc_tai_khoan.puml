@@ -1,0 +1,39 @@
+@startuml
+left to right direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam backgroundColor white
+skinparam ArrowColor #5B657A
+skinparam UsecaseBackgroundColor #F9FBFD
+skinparam UsecaseBorderColor #5B657A
+
+title NutriCare - Use Case Xac Thuc Va Tai Khoan
+
+actor "Nguoi dung\n(chua dang nhap)" as Guest
+actor "Nguoi dung\n(da dang nhap)" as Member
+
+rectangle "Phan he xac thuc va tai khoan" #FFF7E8 {
+  usecase "Dang ky tai khoan" as UC_Register
+  usecase "Dang nhap" as UC_Login
+  usecase "Quen mat khau" as UC_Forgot
+  usecase "Dat lai mat khau" as UC_Reset
+  usecase "Xem va cap nhat ho so" as UC_Profile
+  usecase "Doi mat khau" as UC_ChangePassword
+  usecase "Lam moi phien dang nhap" as UC_Refresh
+  usecase "Dang xuat" as UC_Logout
+}
+
+Guest --> UC_Register
+Guest --> UC_Login
+Guest --> UC_Forgot
+Guest --> UC_Reset
+
+Member --> UC_Profile
+Member --> UC_ChangePassword
+Member --> UC_Logout
+
+UC_Forgot ..> UC_Reset : <<include>>
+UC_Login ..> UC_Refresh : <<extend>>
+UC_Profile ..> UC_ChangePassword : <<extend>>
+@enduml

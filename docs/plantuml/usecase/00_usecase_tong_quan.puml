@@ -1,0 +1,112 @@
+@startuml
+left to right direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam backgroundColor white
+skinparam ArrowColor #666666
+skinparam PackageBorderColor #999999
+skinparam PackageFontStyle bold
+skinparam DefaultFontName Arial
+skinparam DefaultTextAlignment center
+skinparam UsecaseBackgroundColor white
+skinparam UsecaseBorderColor #777777
+skinparam UsecaseFontSize 10
+skinparam UsecaseFontColor black
+skinparam ActorBorderColor #666666
+skinparam ActorBackgroundColor white
+skinparam Padding 1
+skinparam nodesep 14
+skinparam ranksep 14
+
+actor "Nguoi dung\n(chua dang nhap)" as Guest
+actor "Nguoi dung\n(da dang nhap)" as Member
+actor "Nhan vien\nvan hanh" as Staff
+actor "Quan tri vien" as Admin
+
+Guest <|-- Member
+Member <|-- Staff
+Staff <|-- Admin
+
+rectangle "NutriCare System" {
+  package "Chuc nang nguoi dung" {
+    usecase "Dang ky / Dang nhap /\nQuen mat khau" as UC_Auth
+    usecase "Duyet san pham" as UC_Browse
+    usecase "Xem chi tiet san pham\n& do tuoi cong khai" as UC_ProductInfo
+    usecase "Quan ly yeu thich" as UC_Favorites
+    usecase "Chatbot tu van" as UC_Chatbot
+    usecase "Quet AI do tuoi" as UC_Scan
+    usecase "Gui feedback\nket qua scan" as UC_ScanFeedback
+    usecase "Quan ly gio hang\n& Checkout" as UC_Checkout
+    usecase "Quan ly so dia chi\n giao hang" as UC_Address
+    usecase "Ap dung diem thuong\n& voucher" as UC_Rewards
+    usecase "Theo doi don hang\nca nhan" as UC_MyOrders
+    usecase "Sua don\ncho xac nhan" as UC_EditPending
+    usecase "Huy don\ncho xac nhan" as UC_CancelPending
+    usecase "Xac minh do tuoi\nsau giao hang" as UC_ConfirmFresh
+    usecase "Gui khieu nai hoan tien /\ndoi hang theo do tuoi" as UC_Complaint
+    usecase "Xem thong bao\n& cap nhat da doc" as UC_Notifications
+    usecase "Cap nhat ho so /\nDoi mat khau" as UC_Profile
+  }
+
+  package "Chuc nang van hanh / quan tri" {
+    usecase "Dashboard doanh thu\n& thong ke" as UC_Dashboard
+    usecase "Quan ly san pham (CRUD)" as UC_ManageProducts
+    usecase "Quan ly don hang &\nCap nhat trang thai" as UC_ManageOrders
+    usecase "Quan ly kho /\nNhap xuat ton kho" as UC_ManageWarehouse
+    usecase "Quan ly nguoi dung\n& phan quyen" as UC_ManageUsers
+    usecase "Cai dat QR\nthanh toan" as UC_PaymentQR
+    usecase "Theo doi\nfeedback AI scan" as UC_AIFeedback
+    usecase "Bao cao xac minh do tuoi\n& xuat Excel" as UC_FreshReports
+    usecase "Duyet khieu nai do tuoi\n& cong voucher" as UC_ReviewComplaint
+  }
+
+  package "Xu ly noi bo" {
+    usecase "Tao don hang" as UC_CreateOrder
+    usecase "Kiem tra ton kho &\nTru / hoan ton kho" as UC_Stock
+    usecase "Cong diem thuong /\nTao voucher / thong bao" as UC_RewardsEngine
+    usecase "Tao don doi hang" as UC_Replacement
+  }
+}
+
+Guest --> UC_Auth
+Guest --> UC_Browse
+Guest --> UC_Favorites
+Guest --> UC_Chatbot
+Guest --> UC_Scan
+
+Member --> UC_Checkout
+Member --> UC_Address
+Member --> UC_MyOrders
+Member --> UC_ConfirmFresh
+Member --> UC_Complaint
+Member --> UC_Notifications
+Member --> UC_Profile
+Member --> UC_ScanFeedback
+
+Staff --> UC_ManageProducts
+Staff --> UC_ManageOrders
+Staff --> UC_ManageWarehouse
+
+Admin --> UC_Dashboard
+Admin --> UC_ManageUsers
+Admin --> UC_PaymentQR
+Admin --> UC_AIFeedback
+Admin --> UC_FreshReports
+Admin --> UC_ReviewComplaint
+
+UC_ProductInfo ..> UC_Browse : <<extend>>
+UC_Favorites ..> UC_Browse : <<extend>>
+UC_ScanFeedback ..> UC_Scan : <<extend>>
+UC_Checkout ..> UC_Address : <<include>>
+UC_Checkout ..> UC_Rewards : <<extend>>
+UC_Checkout ..> UC_CreateOrder : <<include>>
+UC_CreateOrder ..> UC_Stock : <<include>>
+UC_MyOrders ..> UC_EditPending : <<extend>>
+UC_MyOrders ..> UC_CancelPending : <<extend>>
+UC_ConfirmFresh ..> UC_RewardsEngine : <<include>>
+UC_Complaint ..> UC_ConfirmFresh : <<extend>>
+UC_Replacement ..> UC_Complaint : <<extend>>
+UC_ManageWarehouse ..> UC_Stock : <<include>>
+UC_ReviewComplaint ..> UC_RewardsEngine : <<include>>
+@enduml

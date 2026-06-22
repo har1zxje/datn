@@ -78,7 +78,7 @@ const NutriHeaderHero = ({ onOpenFreshness, onOpenShop }) => {
         <div className="relative min-h-[320px] overflow-hidden bg-slate-950">
           <img
             src="https://images.unsplash.com/photo-1542838132-92c53300491e?q=80&w=1400&auto=format&fit=crop"
-            alt="Thực phẩm sạch FreshFood AI"
+            alt="Thực phẩm sạch NutriGro"
             className="absolute inset-0 h-full w-full object-cover"
             loading="lazy"
           />

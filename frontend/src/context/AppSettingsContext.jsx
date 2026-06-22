@@ -1,4 +1,4 @@
-﻿import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
 const SETTINGS_KEY = 'freshfood:app-settings';
 
@@ -62,7 +62,7 @@ const dictionary = {
     products_none: 'Không tìm thấy sản phẩm phù hợp',
     products_try_again: 'Thử xóa bộ lọc hoặc tìm từ khóa ngắn hơn.',
     products_show_all: 'Xem tất cả sản phẩm',
-    chat_assistant_name: 'Trợ lý FreshFood',
+    chat_assistant_name: 'Trợ lý NutriGro',
     chat_online: 'Sẵn sàng hỗ trợ',
     chat_quick_title: 'Gợi ý nhanh',
     chat_quick_open: 'Mở câu hỏi gợi ý',
@@ -160,7 +160,7 @@ const dictionary = {
     products_none: 'No matching products found',
     products_try_again: 'Try clearing filters or using shorter keywords.',
     products_show_all: 'Show all products',
-    chat_assistant_name: 'FreshFood assistant',
+    chat_assistant_name: 'NutriGro assistant',
     chat_online: 'Ready to help',
     chat_quick_title: 'Quick prompts',
     chat_quick_open: 'Show suggested questions',
